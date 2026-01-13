@@ -1,15 +1,30 @@
 import customtkinter as ctk
-import tkinter as tk # Fallback para componentes sistema
+import tkinter as tk
 from tkinter import messagebox
 import threading
 import time
 from datetime import datetime, timedelta
 import sys
 import os
+import socket
 
 # Configuración Global de UI
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("dark-blue")
+
+# --- Instancia Única (Socket Robusto) ---
+SINGLE_INSTANCE_PORT = 45678
+instance_socket = None
+
+def check_single_instance():
+    global instance_socket
+    instance_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        # Intentamos enlazar al puerto. Si falla, es que ya hay otra app.
+        instance_socket.bind(("127.0.0.1", SINGLE_INSTANCE_PORT))
+    except socket.error:
+        messagebox.showinfo("DarkFocus", "La aplicación ya está abierta.\nRevisa tu barra de tareas.")
+        sys.exit()
 
 class DarkPauseApp(ctk.CTk):
     def __init__(self):
@@ -17,340 +32,211 @@ class DarkPauseApp(ctk.CTk):
         
         # Configuración de Ventana
         self.title("darkpause")
-        
-        # Posición Fija Segura (para evitar problemas con 3 monitores)
         self.geometry("500x750+100+100")
+        self.minsize(500, 750)
         self.resizable(False, False)
 
-        # Interceptar cierre
-        self.protocol("WM_DELETE_WINDOW", self.on_close)
-        
-        # Icono
-        try:
-            self.iconbitmap("assets/icon.ico")
-        except:
-            pass # Si no existe o es png, usamos default
+        # Icono (opcional)
+        try: self.iconbitmap("assets/icon.ico")
+        except: pass
         
         self.blackout_active = False
         self.scheduled_tasks = []
         
-        self.create_modern_widgets()
+        # Interceptar cierre para minimizar
+        self.protocol("WM_DELETE_WINDOW", self.minimize_app)
+
+        self.create_ui()
         
-        # Iniciar hilo de monitoreo
+        # Monitor Loop
         self.running = True
         self.monitor_thread = threading.Thread(target=self.time_monitor, daemon=True)
         self.monitor_thread.start()
 
-        # Verificar persistencia (Watchdog recovery)
-        self.check_persistence()
-
-    def create_modern_widgets(self):
-        # --- Header ---
+    def create_ui(self):
+        # Header
         self.header_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.header_frame.pack(pady=(30, 20), fill="x", padx=20)
         
-        # Botón de Salida (Top Right)
+        # Botón QUIT
         self.exit_btn = ctk.CTkButton(
-            self.header_frame,
-            text="QUIT",
-            width=50,
-            height=25,
-            fg_color="#ff7675",
-            hover_color="#d63031",
-            text_color="white",
-            font=("Segoe UI", 10, "bold"),
-            command=self.exit_app
+            self.header_frame, text="QUIT", width=50, height=25,
+            fg_color="#ff7675", hover_color="#d63031", font=("Segoe UI", 10, "bold"),
+            command=self.quit_app
         )
         self.exit_btn.pack(side="right", anchor="ne")
         
-        # Container título (para centrarlo pese al botón)
+        # Título
         title_container = ctk.CTkFrame(self.header_frame, fg_color="transparent")
         title_container.pack(side="left", expand=True, fill="x")
+        
+        ctk.CTkLabel(title_container, text="darkpause", font=("Segoe UI", 32, "bold"), text_color="#6C5CE7").pack()
+        ctk.CTkLabel(title_container, text="Distraction Freedom Protocol", font=("Segoe UI", 12), text_color="gray").pack()
 
-        self.title_label = ctk.CTkLabel(
-            title_container, 
-            text="darkpause", 
-            font=("Segoe UI", 32, "bold"),
-            text_color="#6C5CE7" 
-        )
-        self.title_label.pack()
-        
-        self.subtitle_label = ctk.CTkLabel(
-            title_container, 
-            text="Distraction Freedom Protocol", 
-            font=("Segoe UI", 12),
-            text_color="gray"
-        )
-        self.subtitle_label.pack()
-
-        # Interceptar el botón de cierre para minimizar
-        self.protocol("WM_DELETE_WINDOW", self.on_close)
-
-    def on_close(self):
-        # Minimizar a la barra
-        messagebox.showinfo("DarkFocus", "App minimizada.\nSigue corriendo para ejecutar tus bloqueos.")
-        self.iconify()
-
-    def exit_app(self):
-        if messagebox.askokcancel("Cerrar Totalmente", "¿Cancelar todos los bloqueos y salir?"):
-            self.running = False
-            self.destroy()
-            sys.exit()
-
-        # --- Sección: Programar Hora ---
-        self.schedule_frame = ctk.CTkFrame(self)
-        self.schedule_frame.pack(fill="x", padx=20, pady=10)
-        
-        ctk.CTkLabel(self.schedule_frame, text="📅 Programar una hora", font=("Segoe UI", 12, "bold")).pack(anchor="w", padx=15, pady=(10, 5))
-        
-        self.input_row_1 = ctk.CTkFrame(self.schedule_frame, fg_color="transparent")
-        self.input_row_1.pack(fill="x", padx=10, pady=(0, 10))
-        
-        self.hour_entry = ctk.CTkEntry(self.input_row_1, placeholder_text="16:00", width=100, justify="center")
-        self.hour_entry.pack(side="left", padx=5)
-        self.hour_entry.insert(0, "16:00")
-        
-        self.hour_duration = ctk.CTkEntry(self.input_row_1, placeholder_text="Min", width=60, justify="center")
-        self.hour_duration.pack(side="left", padx=5)
-        self.hour_duration.insert(0, "60")
-        
-        ctk.CTkButton(
-            self.input_row_1, 
-            text="Programar", 
-            width=100, 
-            command=self.add_scheduled_task,
-            fg_color="#2d3436"
-        ).pack(side="right", padx=5)
-
-        # --- Sección: Cuenta Atrás (Quick Focus) ---
-        self.timer_frame = ctk.CTkFrame(self)
-        self.timer_frame.pack(fill="x", padx=20, pady=10)
-        
-        ctk.CTkLabel(self.timer_frame, text="⏳ Quick Focus (Timer)", font=("Segoe UI", 12, "bold")).pack(anchor="w", padx=15, pady=(10, 5))
-        
-        self.input_row_2 = ctk.CTkFrame(self.timer_frame, fg_color="transparent")
-        self.input_row_2.pack(fill="x", padx=10, pady=(0, 10))
-        
-        ctk.CTkLabel(self.input_row_2, text="En").pack(side="left", padx=(5,2))
-        self.wait_min = ctk.CTkEntry(self.input_row_2, width=50, justify="center")
-        self.wait_min.pack(side="left", padx=2)
-        self.wait_min.insert(0, "0")
-        ctk.CTkLabel(self.input_row_2, text="min").pack(side="left", padx=(2,10))
-        
-        ctk.CTkLabel(self.input_row_2, text="Por").pack(side="left", padx=(5,2))
-        self.wait_duration = ctk.CTkEntry(self.input_row_2, width=50, justify="center")
-        self.wait_duration.pack(side="left", padx=2)
-        self.wait_duration.insert(0, "25")
-        ctk.CTkLabel(self.input_row_2, text="min").pack(side="left", padx=(2,5))
-        
-        ctk.CTkButton(
-            self.input_row_2, 
-            text="GO", 
-            width=60, 
-            command=self.add_countdown_task,
-            fg_color="#00b894", 
-            hover_color="#00cec9",
-            text_color="black"
-        ).pack(side="right", padx=5)
-
-        # --- Sección: Shortcuts (Pomodoro) ---
-        self.preset_frame = ctk.CTkFrame(self)
-        self.preset_frame.pack(fill="x", padx=20, pady=10)
-        
-        ctk.CTkLabel(self.preset_frame, text="⚡ Shortcuts", font=("Segoe UI", 12, "bold")).pack(anchor="w", padx=15, pady=(10, 5))
-        
-        self.preset_row = ctk.CTkFrame(self.preset_frame, fg_color="transparent")
-        self.preset_row.pack(fill="x", padx=10, pady=(0, 10))
-        
-        ctk.CTkButton(
-            self.preset_row, 
-            text="🍅 Pomo 25\n(Work 25m ➜ Block 5m)", 
-            command=lambda: self.add_countdown_task_preset(25, 5),
-            fg_color="#e17055", 
-            hover_color="#d63031",
-            height=50
-        ).pack(side="left", padx=5, fill="x", expand=True)
-
-        ctk.CTkButton(
-            self.preset_row, 
-            text="🧘 Pomo 50\n(Work 50m ➜ Block 10m)", 
-            command=lambda: self.add_countdown_task_preset(50, 10),
-            fg_color="#0984e3", 
-            hover_color="#74b9ff",
-            height=50
-        ).pack(side="left", padx=5, fill="x", expand=True)
-
-        # --- Lista de Tareas ---
-        ctk.CTkLabel(self, text="Cola de Ejecución:", font=("Segoe UI", 11, "bold"), text_color="gray").pack(anchor="w", padx=25, pady=(20, 0))
-        
-        self.task_listbox = tk.Listbox(
-            self, 
-            bg="#2d3436", 
-            fg="white", 
-            borderwidth=0, 
-            highlightthickness=0, 
-            font=("Consolas", 10),
-            activestyle="none"
-        )
-        self.task_listbox.pack(fill="x", padx=20, pady=5, ipady=5)
+        # Inputs
+        self.create_section_schedule()
+        self.create_section_timer()
+        self.create_section_shortcuts()
+        self.create_task_list()
         
         # Footer
         ctk.CTkLabel(self, text="⚠️ NO ESCAPE. NO MERCY.", font=("Segoe UI", 10, "bold"), text_color="#d63031").pack(side="bottom", pady=15)
 
-    def add_scheduled_task(self):
+    def maximize_window(self):
+        self.deiconify()
+        self.lift()
+        self.focus_force()
+
+    def minimize_app(self):
+        # Implementación simple y nativa: Minimizar a la barra
+        self.iconify()
+
+    def quit_app(self):
+        if messagebox.askokcancel("Salir", "¿Cancelar bloqueos y cerrar?"):
+            self.running = False
+            self.destroy()
+            try: instance_socket.close()
+            except: pass
+            sys.exit()
+
+    # --- Secciones UI ---
+    def create_section_schedule(self):
+        f = ctk.CTkFrame(self)
+        f.pack(fill="x", padx=20, pady=10)
+        ctk.CTkLabel(f, text="📅 Programar Hora", font=("Segoe UI", 12, "bold")).pack(anchor="w", padx=15, pady=(10,5))
+        
+        row = ctk.CTkFrame(f, fg_color="transparent")
+        row.pack(fill="x", padx=10, pady=(0,10))
+        
+        self.hour_entry = ctk.CTkEntry(row, placeholder_text="16:00", width=100, justify="center")
+        self.hour_entry.pack(side="left", padx=5)
+        self.hour_entry.insert(0, "16:00")
+        
+        self.hour_duration = ctk.CTkEntry(row, placeholder_text="60", width=60, justify="center")
+        self.hour_duration.pack(side="left", padx=5)
+        self.hour_duration.insert(0, "60")
+        
+        ctk.CTkButton(row, text="Programar", width=100, command=self.add_fixed_task, fg_color="#2d3436").pack(side="right", padx=5)
+
+    def create_section_timer(self):
+        f = ctk.CTkFrame(self)
+        f.pack(fill="x", padx=20, pady=10)
+        ctk.CTkLabel(f, text="⏳ Quick Focus", font=("Segoe UI", 12, "bold")).pack(anchor="w", padx=15, pady=(10,5))
+        
+        row = ctk.CTkFrame(f, fg_color="transparent")
+        row.pack(fill="x", padx=10, pady=(0,10))
+        
+        ctk.CTkLabel(row, text="En").pack(side="left", padx=2)
+        self.wait_min = ctk.CTkEntry(row, width=50, justify="center")
+        self.wait_min.pack(side="left", padx=2); self.wait_min.insert(0, "0")
+        
+        ctk.CTkLabel(row, text="min, Por").pack(side="left", padx=5)
+        self.wait_dur = ctk.CTkEntry(row, width=50, justify="center")
+        self.wait_dur.pack(side="left", padx=2); self.wait_dur.insert(0, "25")
+        ctk.CTkLabel(row, text="min").pack(side="left", padx=2)
+        
+        ctk.CTkButton(row, text="GO", width=60, command=self.add_timer_task, fg_color="#00b894", text_color="black").pack(side="right", padx=5)
+
+    def create_section_shortcuts(self):
+        f = ctk.CTkFrame(self)
+        f.pack(fill="x", padx=20, pady=10)
+        ctk.CTkLabel(f, text="⚡ Shortcuts", font=("Segoe UI", 12, "bold")).pack(anchor="w", padx=15, pady=(10,5))
+        
+        row = ctk.CTkFrame(f, fg_color="transparent")
+        row.pack(fill="x", padx=10, pady=(0,10))
+        
+        ctk.CTkButton(row, text="🍅 Pomo 25", command=lambda: self.add_preset(25, 5), fg_color="#e17055", width=140).pack(side="left", padx=5, expand=True)
+        ctk.CTkButton(row, text="🧘 Pomo 50", command=lambda: self.add_preset(50, 10), fg_color="#0984e3", width=140).pack(side="left", padx=5, expand=True)
+
+    def create_task_list(self):
+        ctk.CTkLabel(self, text="Cola de Ejecución:", font=("Segoe UI", 11, "bold"), text_color="gray").pack(anchor="w", padx=25, pady=(20,0))
+        self.task_listbox = tk.Listbox(self, bg="#2d3436", fg="white", borderwidth=0, highlightthickness=0, font=("Consolas", 10), height=6)
+        self.task_listbox.pack(fill="x", padx=20, pady=5)
+
+    # --- Lógica ---
+    def add_fixed_task(self):
         try:
-            t_str = self.hour_entry.get()
-            duration = int(self.hour_duration.get())
-            datetime.strptime(t_str, "%H:%M") # Validate
-            self.scheduled_tasks.append({"type": "fixed", "time": t_str, "duration": duration, "active": True})
-            self.update_task_list()
-        except ValueError:
-            messagebox.showerror("Error", "Formato inválido. Usa HH:MM y números.")
+            t = self.hour_entry.get(); d = int(self.hour_duration.get())
+            datetime.strptime(t, "%H:%M")
+            self.scheduled_tasks.append({"type": "fixed", "time": t, "duration": d, "active": True})
+            self.update_list()
+        except: messagebox.showerror("Error", "Formato inválido (HH:MM)")
 
-    def add_countdown_task(self):
+    def add_timer_task(self):
         try:
-            wait = int(self.wait_min.get())
-            duration = int(self.wait_duration.get())
-            target_time = (datetime.now() + timedelta(minutes=wait)).strftime("%H:%M:%S")
-            self.scheduled_tasks.append({"type": "countdown", "time": target_time, "duration": duration, "active": True})
-            self.update_task_list()
-        except ValueError:
-            messagebox.showerror("Error", "Introduce números válidos.")
+            w = int(self.wait_min.get()); d = int(self.wait_dur.get())
+            t = (datetime.now() + timedelta(minutes=w)).strftime("%H:%M:%S")
+            self.scheduled_tasks.append({"time": t, "duration": d, "active": True, "type": "timer"})
+            self.update_list()
+        except: messagebox.showerror("Error", "Números inválidos")
 
-    def add_countdown_task_preset(self, wait, duration):
-        target_time = (datetime.now() + timedelta(minutes=wait)).strftime("%H:%M:%S")
-        self.scheduled_tasks.append({"type": "countdown", "time": target_time, "duration": duration, "active": True})
-        self.update_task_list()
+    def add_preset(self, w, d):
+        t = (datetime.now() + timedelta(minutes=w)).strftime("%H:%M:%S")
+        self.scheduled_tasks.append({"time": t, "duration": d, "active": True, "type": "timer"})
+        self.update_list()
 
-    def update_task_list(self):
+    def update_list(self):
         self.task_listbox.delete(0, tk.END)
-        for task in self.scheduled_tasks:
-            icon = "⏰" if task['type'] == 'fixed' else "⏳"
-            info = f" {icon}  {task['time']}  ➜  {task['duration']} min"
-            self.task_listbox.insert(tk.END, info)
-
-    def check_persistence(self):
-        # Misma lógica de persistencia que antes
-        try:
-            with open("session.lock", "r") as f:
-                end_str = f.read().strip()
-                if end_str:
-                    try:
-                        end_time = datetime.strptime(end_str, "%Y%m%d%H%M%S")
-                        now = datetime.now()
-                        if end_time > now:
-                            remaining = (end_time - now).total_seconds() / 60
-                            self.after(1000, lambda: self.start_blackout(remaining, restart=True))
-                        else:
-                            if os.path.exists("session.lock"): os.remove("session.lock")
-                    except: pass
-        except FileNotFoundError: pass
+        for t in self.scheduled_tasks:
+            self.task_listbox.insert(tk.END, f"{'⏰' if t.get('type')=='fixed' else '⏳'} {t['time']} -> {t['duration']}m")
 
     def time_monitor(self):
         while self.running:
             now = datetime.now()
-            current_time_short = now.strftime("%H:%M")
-            current_time_full = now.strftime("%H:%M:%S")
+            t_short = now.strftime("%H:%M"); t_long = now.strftime("%H:%M:%S")
             
             for task in self.scheduled_tasks:
                 if task['active']:
-                    is_time = False
-                    if task['type'] == 'fixed' and current_time_short == task['time']: is_time = True
-                    elif task['type'] == 'countdown' and current_time_full == task['time']: is_time = True
-                        
-                    if is_time:
+                    if (task.get('type') == 'fixed' and t_short == task['time']) or \
+                       (task.get('type') == 'timer' and t_long == task['time']):
                         task['active'] = False
                         self.after(0, lambda t=task: self.start_blackout(t['duration']))
-                        self.after(0, self.update_task_list)
+                        self.after(0, self.update_list)
             time.sleep(1)
 
-    def start_blackout(self, minutes, restart=False):
+    def start_blackout(self, minutes):
         if self.blackout_active: return
         self.blackout_active = True
         
-        # --- Lógica Watchdog & Lock ---
-        if not restart:
-            end_dt = datetime.now() + timedelta(minutes=minutes)
-            ahk_timestamp = end_dt.strftime("%Y%m%d%H%M%S")
-            try:
-                with open("session.lock", "w") as f: f.write(ahk_timestamp)
-                if os.path.exists("watchdog.ahk"): os.startfile("watchdog.ahk")
-            except Exception as e: print(f"Watchdog error: {e}")
-
-        # --- Overlay Negro (Multi-Monitor) ---
-        # Detectar configuración de monitores
+        # Overlay Nativo Robusto
+        self.overlays = []
         try:
             from screeninfo import get_monitors
             monitors = get_monitors()
-        except ImportError:
-            # Fallback a monitor principal si falla la librería
-            monitors = [type('obj', (object,), {'x': 0, 'y': 0, 'width': self.winfo_screenwidth(), 'height': self.winfo_screenheight(), 'is_primary': True})]
-
-        self.overlays = []
+        except:
+            monitors = [type('obj', (), {'x':0, 'y':0, 'width':self.winfo_screenwidth(), 'height':self.winfo_screenheight()})]
 
         for m in monitors:
-            overlay = tk.Toplevel(self)
+            win = tk.Toplevel(self)
+            win.geometry(f"{m.width}x{m.height}+{m.x}+{m.y}")
+            win.attributes("-topmost", True)
+            win.overrideredirect(True)
+            win.configure(bg="black")
+            win.config(cursor="none")
+            win.protocol("WM_DELETE_WINDOW", lambda: None)
             
-            # Geometría exacta para cada monitor
-            # Nota: Usamos geometry() con offset para posicionar en monitores secundarios
-            overlay.geometry(f"{m.width}x{m.height}+{m.x}+{m.y}")
+            if m.x == 0: # Monitor principal
+                tk.Label(win, text="FOCUS MODE", bg="black", fg="#222222", font=("Segoe UI", 20, "bold")).pack(expand=True)
             
-            overlay.overrideredirect(True) # Sin bordes
-            overlay.attributes("-topmost", True)
-            overlay.configure(bg="black")
-            overlay.config(cursor="none")
-            
-            # Título específico para el monitor principal (detectado por posición 0,0 o flag)
-            if m.x == 0 and m.y == 0:
-                overlay.title("darkpause_overlay") # Título para el Watchdog
-            
-            overlay.protocol("WM_DELETE_WINDOW", lambda: None)
-            
-            # Etiqueta solo en el monitor principal (opcional, o en todos)
-            if m.x == 0 and m.y == 0:
-                tk.Label(overlay, text="FOCUS MODE", bg="black", fg="#222222", font=("Segoe UI", 20, "bold")).pack(expand=True)
-            
-            self.overlays.append(overlay)
+            self.overlays.append(win)
 
-        def end_blackout():
+        def end():
             self.blackout_active = False
-            # Liberar foco y destruir todas las ventanas
-            try:
-                for ov in self.overlays:
-                    try:
-                        ov.grab_release()
-                        ov.destroy()
-                    except: pass
-            except: pass
-            
+            for o in self.overlays: o.destroy()
             self.overlays = []
-            
-            if os.path.exists("session.lock"):
-                try: os.remove("session.lock")
-                except: pass
 
-        # Timer sincronizado para cerrar todas
-        self.after(int(minutes * 60000), end_blackout)
+        self.after(int(minutes * 60000), end)
         
-        def maintain_focus():
+        # Focus Loop Robusto
+        def keep_focus():
             if self.blackout_active:
-                # Enfocar la ventana del monitor principal (asumimos que es la primera en (0,0))
-                # o iterar para traerlas todas al frente
-                for ov in self.overlays:
-                    try:
-                        ov.lift()
-                        # Solo hacemos focus_force y grab en una para no volver loco al sistema
-                        # Preferiblemente la que tiene título "darkpause_overlay"
-                        if "darkpause_overlay" in ov.title():
-                            ov.focus_force()
-                            try: ov.grab_set_global() 
-                            except: pass
-                    except: pass
-                
-                self.after(300, maintain_focus)
-        
-        maintain_focus()
+                for o in self.overlays:
+                    o.lift()
+                    if o.winfo_x() == 0: o.focus_force()
+                self.after(500, keep_focus)
+        keep_focus()
 
 if __name__ == "__main__":
+    check_single_instance()
     app = DarkPauseApp()
     app.mainloop()

@@ -16,7 +16,7 @@
         try {
             ; En V2 los parámetros son expresiones.
             ; Pasamos el directorio de trabajo para asegurar que Python encuentre los assets.
-            Run 'python "' ScriptPath '"', WorkingDir, "Hide"
+            Run 'pythonw "' ScriptPath '"', WorkingDir
         } catch as e {
             MsgBox "Error lanzando darkpause: " e.Message
         }
