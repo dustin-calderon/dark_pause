@@ -20,8 +20,10 @@ class DarkPauseApp(ctk.CTk):
         
         # Posición Fija Segura (para evitar problemas con 3 monitores)
         self.geometry("500x750+100+100")
-        
         self.resizable(False, False)
+
+        # Interceptar cierre
+        self.protocol("WM_DELETE_WINDOW", self.on_close)
         
         # Icono
         try:
@@ -45,23 +47,55 @@ class DarkPauseApp(ctk.CTk):
     def create_modern_widgets(self):
         # --- Header ---
         self.header_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.header_frame.pack(pady=(30, 20))
+        self.header_frame.pack(pady=(30, 20), fill="x", padx=20)
         
+        # Botón de Salida (Top Right)
+        self.exit_btn = ctk.CTkButton(
+            self.header_frame,
+            text="QUIT",
+            width=50,
+            height=25,
+            fg_color="#ff7675",
+            hover_color="#d63031",
+            text_color="white",
+            font=("Segoe UI", 10, "bold"),
+            command=self.exit_app
+        )
+        self.exit_btn.pack(side="right", anchor="ne")
+        
+        # Container título (para centrarlo pese al botón)
+        title_container = ctk.CTkFrame(self.header_frame, fg_color="transparent")
+        title_container.pack(side="left", expand=True, fill="x")
+
         self.title_label = ctk.CTkLabel(
-            self.header_frame, 
+            title_container, 
             text="darkpause", 
             font=("Segoe UI", 32, "bold"),
-            text_color="#6C5CE7" # Un color púrpura/azulado moderno
+            text_color="#6C5CE7" 
         )
         self.title_label.pack()
         
         self.subtitle_label = ctk.CTkLabel(
-            self.header_frame, 
+            title_container, 
             text="Distraction Freedom Protocol", 
             font=("Segoe UI", 12),
             text_color="gray"
         )
         self.subtitle_label.pack()
+
+        # Interceptar el botón de cierre para minimizar
+        self.protocol("WM_DELETE_WINDOW", self.on_close)
+
+    def on_close(self):
+        # Minimizar a la barra
+        messagebox.showinfo("DarkFocus", "App minimizada.\nSigue corriendo para ejecutar tus bloqueos.")
+        self.iconify()
+
+    def exit_app(self):
+        if messagebox.askokcancel("Cerrar Totalmente", "¿Cancelar todos los bloqueos y salir?"):
+            self.running = False
+            self.destroy()
+            sys.exit()
 
         # --- Sección: Programar Hora ---
         self.schedule_frame = ctk.CTkFrame(self)
