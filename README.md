@@ -1,36 +1,66 @@
 # 🌌 darkpause
 
-Una herramienta de disciplina digital ineludible para Windows. Bloquea tu pantalla completamente durante el tiempo que tú decidas para obligarte a descansar o enfocarte sin distracciones.
+**The Unstoppable Distraction Killer.**
 
-## 🎮 Manual de Uso
+<p align="center">
+  <img src="assets/icon.png" width="100" />
+</p>
 
-### 1. Invocar el Panel
+<p align="center">
+  <img src="assets/screenshot.png" width="600" />
+</p>
 
-Presiona **`Ctrl + Alt + D`** en cualquier momento.
+Darkpause es una herramienta de disciplina digital extrema para Windows. Su objetivo es simple: **forzarte a desconectar o enfocarte eliminando cualquier distracción visual.**
 
-### 2. Elige tu modo
+Cuando se activa, despliega una capa negra infranqueable sobre **todos tus monitores**, bloquea el cierre del programa y vigila constantemente para evitar que lo elimines.
 
-- **⏳ Quick Focus:** Escribe los minutos y dale a **GO**. (Ej: Bloquear por 25 min).
-- **📅 Programar:** Define una hora exacta para el bloqueo. (Ej: A las 18:00 por 60 min).
-- **⚡ Shortcuts (Pomodoro):**
-  - **🍅 Pomo 25:** Trabaja 25 min -> Bloqueo de 5 min.
-  - **🧘 Pomo 50:** Trabaja 50 min -> Bloqueo de 10 min.
-
-### ⚠️ Advertencia Importante
-
-**No hay botón de salida.**
-Una vez que la pantalla se pone negra, **no hay forma de cancelar**.
-Ni cerrando la app, ni reiniciando el proceso. Debes esperar a que termine el tiempo.
-_Úsalo con responsabilidad._
+> _"La única forma de salir es esperar."_
 
 ---
 
-### 🛠️ Instalación (Solo 1 vez)
+## 🔥 Características
 
-1. Instalar Python y AutoHotkey v2.
-2. `pip install customtkinter screeninfo`
-3. Doble clic en `launcher.ahk`.
-4. **Para que arranque siempre:**
-   - Presiona `Win + R`.
-   - Escribe `shell:startup` y pulsa Enter.
-   - Crea un acceso directo de `launcher.ahk` y pégalo ahí.
+- **🖥️ Cobertura Total:** Detecta y bloquea automáticamente todos tus monitores (soporte multi-monitor nativo).
+- **�️ Modo Ineludible:** Si intentas cerrar la app con el Administrador de Tareas, un proceso "Watchdog" de bajo nivel la resucita instantáneamente.
+- **👻 Stealth Launcher:** Invoca la interfaz en cualquier momento con `Ctrl + Alt + D`.
+- **� UI Moderna:** Interfaz minimalista y oscura (CustomTkinter).
+- **🍅 Pomodoro Shortcuts:** Botones rápidos para flujos de trabajo de 25/5 y 50/10 minutos.
+
+---
+
+## 🎮 Cómo se usa
+
+1.  Presiona **`Ctrl + Alt + D`**.
+2.  Elige tu veneno:
+    - **Quick Focus:** _"Bloquear por X minutos"_.
+    - **Programado:** _"Bloquear a las 18:00 durante 1 hora"_.
+    - **Shortcuts:** Clic en `🍅 Pomo 25` para una sesión estándar de trabajo/descanso.
+3.  Di adiós a tu PC hasta que el timer llegue a cero.
+
+---
+
+## 🛠️ Instalación
+
+Requisitos: Python 3.10+ y AutoHotkey v2.0+.
+
+1.  **Instalar Dependencias:**
+
+    ```bash
+    pip install customtkinter screeninfo
+    ```
+
+2.  **Activar el Lanzador:**
+
+    - Haz doble clic en el archivo `launcher.ahk`.
+    - Verás una pequeña **H** verde en la bandeja de sistema. Ahora el atajo está activo.
+
+3.  **Auto-Arranque (Opcional):**
+    - Presiona `Win + R`, escribe `shell:startup` y pulsa Enter.
+    - Crea un acceso directo de `launcher.ahk` dentro de esa carpeta.
+    - _Listo, ahora darkpause protegerá tu productividad desde que enciendes el PC._
+
+---
+
+## ⚠️ Disclaimer
+
+Esta herramienta está diseñada para usuarios que quieren comprometerse seriamente con su tiempo. **No hay botón de emergencia.** Úsala con responsabilidad.

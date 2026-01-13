@@ -23,8 +23,11 @@ class DarkPauseApp(ctk.CTk):
         
         self.resizable(False, False)
         
-        # Icono (Si existiera, por ahora default)
-        # self.iconbitmap("icon.ico")
+        # Icono
+        try:
+            self.iconbitmap("assets/icon.ico")
+        except:
+            pass # Si no existe o es png, usamos default
         
         self.blackout_active = False
         self.scheduled_tasks = []
