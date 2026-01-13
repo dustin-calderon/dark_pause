@@ -64,3 +64,14 @@ Requisitos: Python 3.10+ y AutoHotkey v2.0+.
 ## ⚠️ Disclaimer
 
 Esta herramienta está diseñada para usuarios que quieren comprometerse seriamente con su tiempo. **No hay botón de emergencia.** Úsala con responsabilidad.
+
+---
+
+## 🤝 Contribuciones
+
+¡Este proyecto es **Open Source** y abierto a colaboraciones!
+Si tienes ideas para funciones más extremas o mejoras de UI, siéntete libre de hacer un Fork y enviar tus Pull Requests.
+
+## 📄 Licencia
+
+Este proyecto está bajo la Licencia **MIT**. Puedes usarlo, modificarlo y compartirlo libremente.
