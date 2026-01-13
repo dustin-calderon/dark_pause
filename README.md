@@ -28,7 +28,7 @@ _Úsalo con responsabilidad._
 ### 🛠️ Instalación (Solo 1 vez)
 
 1. Instalar Python y AutoHotkey v2.
-2. `pip install customtkinter`
+2. `pip install customtkinter screeninfo`
 3. Doble clic en `launcher.ahk`.
 4. **Para que arranque siempre:**
    - Presiona `Win + R`.

@@ -18,13 +18,8 @@ class DarkPauseApp(ctk.CTk):
         # Configuración de Ventana
         self.title("darkpause")
         
-        # Centrar Ventana
-        w, h = 500, 750
-        ws = self.winfo_screenwidth()
-        hs = self.winfo_screenheight()
-        x = (ws/2) - (w/2)
-        y = (hs/2) - (h/2)
-        self.geometry('%dx%d+%d+%d' % (w, h, x, y))
+        # Posición Fija Segura (para evitar problemas con 3 monitores)
+        self.geometry("500x750+100+100")
         
         self.resizable(False, False)
         
@@ -245,36 +240,77 @@ class DarkPauseApp(ctk.CTk):
                 if os.path.exists("watchdog.ahk"): os.startfile("watchdog.ahk")
             except Exception as e: print(f"Watchdog error: {e}")
 
-        # --- Overlay Negro ---
-        # Usamos Toplevel normal de tkinter porque CustomTkinter Toplevel tiene barra de título a veces difícil de quitar en modo fullscreen total sin bordes raros
-        overlay = tk.Toplevel(self)
-        overlay.attributes("-fullscreen", True)
-        overlay.attributes("-topmost", True)
-        overlay.configure(bg="black")
-        overlay.config(cursor="none")
-        overlay.title("darkpause_overlay")
-        overlay.protocol("WM_DELETE_WINDOW", lambda: None)
-        
-        # Etiqueta motivacional sutil
-        tk.Label(overlay, text="FOCUS MODE", bg="black", fg="#222222", font=("Segoe UI", 20, "bold")).pack(expand=True)
+        # --- Overlay Negro (Multi-Monitor) ---
+        # Detectar configuración de monitores
+        try:
+            from screeninfo import get_monitors
+            monitors = get_monitors()
+        except ImportError:
+            # Fallback a monitor principal si falla la librería
+            monitors = [type('obj', (object,), {'x': 0, 'y': 0, 'width': self.winfo_screenwidth(), 'height': self.winfo_screenheight(), 'is_primary': True})]
+
+        self.overlays = []
+
+        for m in monitors:
+            overlay = tk.Toplevel(self)
+            
+            # Geometría exacta para cada monitor
+            # Nota: Usamos geometry() con offset para posicionar en monitores secundarios
+            overlay.geometry(f"{m.width}x{m.height}+{m.x}+{m.y}")
+            
+            overlay.overrideredirect(True) # Sin bordes
+            overlay.attributes("-topmost", True)
+            overlay.configure(bg="black")
+            overlay.config(cursor="none")
+            
+            # Título específico para el monitor principal (detectado por posición 0,0 o flag)
+            if m.x == 0 and m.y == 0:
+                overlay.title("darkpause_overlay") # Título para el Watchdog
+            
+            overlay.protocol("WM_DELETE_WINDOW", lambda: None)
+            
+            # Etiqueta solo en el monitor principal (opcional, o en todos)
+            if m.x == 0 and m.y == 0:
+                tk.Label(overlay, text="FOCUS MODE", bg="black", fg="#222222", font=("Segoe UI", 20, "bold")).pack(expand=True)
+            
+            self.overlays.append(overlay)
 
         def end_blackout():
             self.blackout_active = False
-            overlay.grab_release()
-            overlay.destroy()
+            # Liberar foco y destruir todas las ventanas
+            try:
+                for ov in self.overlays:
+                    try:
+                        ov.grab_release()
+                        ov.destroy()
+                    except: pass
+            except: pass
+            
+            self.overlays = []
+            
             if os.path.exists("session.lock"):
                 try: os.remove("session.lock")
                 except: pass
 
-        overlay.after(int(minutes * 60000), end_blackout)
+        # Timer sincronizado para cerrar todas
+        self.after(int(minutes * 60000), end_blackout)
         
         def maintain_focus():
             if self.blackout_active:
-                overlay.focus_force()
-                overlay.lift()
-                try: overlay.grab_set_global() 
-                except: pass
-                overlay.after(300, maintain_focus)
+                # Enfocar la ventana del monitor principal (asumimos que es la primera en (0,0))
+                # o iterar para traerlas todas al frente
+                for ov in self.overlays:
+                    try:
+                        ov.lift()
+                        # Solo hacemos focus_force y grab en una para no volver loco al sistema
+                        # Preferiblemente la que tiene título "darkpause_overlay"
+                        if "darkpause_overlay" in ov.title():
+                            ov.focus_force()
+                            try: ov.grab_set_global() 
+                            except: pass
+                    except: pass
+                
+                self.after(300, maintain_focus)
         
         maintain_focus()
 
