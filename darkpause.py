@@ -1,242 +1,281 @@
-import customtkinter as ctk
-import tkinter as tk
-from tkinter import messagebox
-import threading
-import time
-from datetime import datetime, timedelta
-import sys
-import os
+"""
+DarkPause — The Unstoppable Distraction Killer.
+
+Unified digital discipline app for Windows that:
+1. Limits daily usage of specific platforms (Instagram, YouTube)
+2. Permanently blocks adult content domains
+3. Provides fullscreen blackout mode for deep focus sessions
+4. Applies DNS anti-bypass via Windows Firewall rules
+5. Periodically verifies hosts file integrity against tampering
+
+Entry point: sets up logging, checks admin privileges,
+and starts the system tray + Tkinter event loop.
+"""
+
+import ctypes
+import logging
 import socket
+import sys
+import threading
+import tkinter as tk
+from pathlib import Path
 
-# Configuración Global de UI
-ctk.set_appearance_mode("Dark")
-ctk.set_default_color_theme("dark-blue")
+logger = logging.getLogger("darkpause")
 
-# --- Instancia Única (Socket Robusto) ---
-SINGLE_INSTANCE_PORT = 45678
-instance_socket = None
+# ─── Single Instance ───
+_instance_socket: socket.socket | None = None
 
-def check_single_instance():
-    global instance_socket
-    instance_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+# ─── Integrity Check Interval ───
+_INTEGRITY_CHECK_MS: int = 30_000  # 30 seconds
+
+
+def _check_single_instance(port: int) -> None:
+    """
+    Ensure only one instance of DarkPause is running.
+
+    Args:
+        port: TCP port to bind for single-instance check.
+    """
+    global _instance_socket
+    _instance_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
-        # Intentamos enlazar al puerto. Si falla, es que ya hay otra app.
-        instance_socket.bind(("127.0.0.1", SINGLE_INSTANCE_PORT))
+        _instance_socket.bind(("127.0.0.1", port))
     except socket.error:
-        messagebox.showinfo("DarkFocus", "La aplicación ya está abierta.\nRevisa tu barra de tareas.")
-        sys.exit()
+        logger.warning("DarkPause is already running. Exiting.")
+        sys.exit(0)
 
-class DarkPauseApp(ctk.CTk):
-    def __init__(self):
-        super().__init__()
-        
-        # Configuración de Ventana
-        self.title("darkpause")
-        self.geometry("500x750+100+100")
-        self.minsize(500, 750)
-        self.resizable(False, False)
 
-        # Icono (opcional)
-        try: self.iconbitmap("assets/icon.ico")
-        except: pass
-        
-        self.blackout_active = False
-        self.scheduled_tasks = []
-        
-        # Interceptar cierre para minimizar
-        self.protocol("WM_DELETE_WINDOW", self.minimize_app)
+# ─── Admin Privileges ───
+def _is_admin() -> bool:
+    """Check if the current process has Administrator privileges."""
+    try:
+        return ctypes.windll.shell32.IsUserAnAdmin() != 0
+    except AttributeError:
+        return False
 
-        self.create_ui()
-        
-        # Monitor Loop
-        self.running = True
-        self.monitor_thread = threading.Thread(target=self.time_monitor, daemon=True)
-        self.monitor_thread.start()
 
-    def create_ui(self):
-        # Header
-        self.header_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.header_frame.pack(pady=(30, 20), fill="x", padx=20)
-        
-        # Botón QUIT
-        self.exit_btn = ctk.CTkButton(
-            self.header_frame, text="QUIT", width=50, height=25,
-            fg_color="#ff7675", hover_color="#d63031", font=("Segoe UI", 10, "bold"),
-            command=self.quit_app
+def _get_pythonw_path() -> str:
+    """
+    Resolve the path to pythonw.exe robustly.
+
+    Handles case-insensitive executable names and avoids
+    double-replacing if sys.executable already is pythonw.exe.
+
+    Returns:
+        str: Full path to pythonw.exe.
+    """
+    exe_path = Path(sys.executable)
+    stem_lower: str = exe_path.stem.lower()
+
+    if stem_lower == "pythonw":
+        return str(exe_path)
+
+    if stem_lower == "python":
+        return str(exe_path.with_name(f"pythonw{exe_path.suffix}"))
+
+    candidate: Path = exe_path.parent / "pythonw.exe"
+    if candidate.exists():
+        return str(candidate)
+
+    return "pythonw.exe"
+
+
+def _request_admin_restart() -> None:
+    """
+    Restart the script with Administrator privileges using UAC.
+
+    Uses pythonw.exe for windowless execution so no console appears.
+    """
+    try:
+        pythonw: str = _get_pythonw_path()
+        quoted_args: str = " ".join(f'"{arg}"' for arg in sys.argv)
+        ctypes.windll.shell32.ShellExecuteW(
+            None,
+            "runas",
+            pythonw,
+            quoted_args,
+            None,
+            0,  # SW_HIDE
         )
-        self.exit_btn.pack(side="right", anchor="ne")
-        
-        # Título
-        title_container = ctk.CTkFrame(self.header_frame, fg_color="transparent")
-        title_container.pack(side="left", expand=True, fill="x")
-        
-        ctk.CTkLabel(title_container, text="darkpause", font=("Segoe UI", 32, "bold"), text_color="#6C5CE7").pack()
-        ctk.CTkLabel(title_container, text="Distraction Freedom Protocol", font=("Segoe UI", 12), text_color="gray").pack()
+    except Exception as e:
+        logger.error(f"Failed to request admin restart: {e}")
 
-        # Inputs
-        self.create_section_schedule()
-        self.create_section_timer()
-        self.create_section_shortcuts()
-        self.create_task_list()
-        
-        # Footer
-        ctk.CTkLabel(self, text="⚠️ NO ESCAPE. NO MERCY.", font=("Segoe UI", 10, "bold"), text_color="#d63031").pack(side="bottom", pady=15)
 
-    def maximize_window(self):
-        self.deiconify()
-        self.lift()
-        self.focus_force()
+# ─── Logging Setup ───
+def _setup_logging(log_file: Path) -> None:
+    """
+    Configure application-wide logging.
 
-    def minimize_app(self):
-        # Implementación simple y nativa: Minimizar a la barra
-        self.iconify()
+    Args:
+        log_file: Path to the log file.
+    """
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        handlers=[
+            logging.FileHandler(str(log_file), encoding="utf-8"),
+            logging.StreamHandler(),
+        ],
+    )
 
-    def quit_app(self):
-        if messagebox.askokcancel("Salir", "¿Cancelar bloqueos y cerrar?"):
-            self.running = False
-            self.destroy()
-            try: instance_socket.close()
-            except: pass
-            sys.exit()
 
-    # --- Secciones UI ---
-    def create_section_schedule(self):
-        f = ctk.CTkFrame(self)
-        f.pack(fill="x", padx=20, pady=10)
-        ctk.CTkLabel(f, text="📅 Programar Hora", font=("Segoe UI", 12, "bold")).pack(anchor="w", padx=15, pady=(10,5))
-        
-        row = ctk.CTkFrame(f, fg_color="transparent")
-        row.pack(fill="x", padx=10, pady=(0,10))
-        
-        self.hour_entry = ctk.CTkEntry(row, placeholder_text="16:00", width=100, justify="center")
-        self.hour_entry.pack(side="left", padx=5)
-        self.hour_entry.insert(0, "16:00")
-        
-        self.hour_duration = ctk.CTkEntry(row, placeholder_text="60", width=60, justify="center")
-        self.hour_duration.pack(side="left", padx=5)
-        self.hour_duration.insert(0, "60")
-        
-        ctk.CTkButton(row, text="Programar", width=100, command=self.add_fixed_task, fg_color="#2d3436").pack(side="right", padx=5)
+# ─── Main ───
+def main() -> None:
+    """Main entry point for DarkPause."""
+    from core.config import (
+        ALL_PLATFORMS, APP_DATA_DIR, APP_NAME, RESET_HOUR, SINGLE_INSTANCE_PORT,
+    )
 
-    def create_section_timer(self):
-        f = ctk.CTkFrame(self)
-        f.pack(fill="x", padx=20, pady=10)
-        ctk.CTkLabel(f, text="⏳ Quick Focus", font=("Segoe UI", 12, "bold")).pack(anchor="w", padx=15, pady=(10,5))
-        
-        row = ctk.CTkFrame(f, fg_color="transparent")
-        row.pack(fill="x", padx=10, pady=(0,10))
-        
-        ctk.CTkLabel(row, text="En").pack(side="left", padx=2)
-        self.wait_min = ctk.CTkEntry(row, width=50, justify="center")
-        self.wait_min.pack(side="left", padx=2); self.wait_min.insert(0, "0")
-        
-        ctk.CTkLabel(row, text="min, Por").pack(side="left", padx=5)
-        self.wait_dur = ctk.CTkEntry(row, width=50, justify="center")
-        self.wait_dur.pack(side="left", padx=2); self.wait_dur.insert(0, "25")
-        ctk.CTkLabel(row, text="min").pack(side="left", padx=2)
-        
-        ctk.CTkButton(row, text="GO", width=60, command=self.add_timer_task, fg_color="#00b894", text_color="black").pack(side="right", padx=5)
+    APP_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    log_file: Path = APP_DATA_DIR / "darkpause.log"
+    _setup_logging(log_file)
 
-    def create_section_shortcuts(self):
-        f = ctk.CTkFrame(self)
-        f.pack(fill="x", padx=20, pady=10)
-        ctk.CTkLabel(f, text="⚡ Shortcuts", font=("Segoe UI", 12, "bold")).pack(anchor="w", padx=15, pady=(10,5))
-        
-        row = ctk.CTkFrame(f, fg_color="transparent")
-        row.pack(fill="x", padx=10, pady=(0,10))
-        
-        ctk.CTkButton(row, text="🍅 Pomo 25", command=lambda: self.add_preset(25, 5), fg_color="#e17055", width=140).pack(side="left", padx=5, expand=True)
-        ctk.CTkButton(row, text="🧘 Pomo 50", command=lambda: self.add_preset(50, 10), fg_color="#0984e3", width=140).pack(side="left", padx=5, expand=True)
+    logger.info("=" * 50)
+    logger.info(f"  {APP_NAME} Starting...")
+    logger.info("=" * 50)
 
-    def create_task_list(self):
-        ctk.CTkLabel(self, text="Cola de Ejecución:", font=("Segoe UI", 11, "bold"), text_color="gray").pack(anchor="w", padx=25, pady=(20,0))
-        self.task_listbox = tk.Listbox(self, bg="#2d3436", fg="white", borderwidth=0, highlightthickness=0, font=("Consolas", 10), height=6)
-        self.task_listbox.pack(fill="x", padx=20, pady=5)
+    # Admin check
+    if not _is_admin():
+        logger.warning("⚠️ DarkPause requires Administrator privileges.")
+        logger.info("🔄 Requesting elevated restart...")
+        _request_admin_restart()
+        sys.exit(0)
 
-    # --- Lógica ---
-    def add_fixed_task(self):
+    logger.info("🔑 Running with Administrator privileges.")
+
+    # Single instance
+    _check_single_instance(SINGLE_INSTANCE_PORT)
+
+    logger.info(f"   📁 Data dir: {APP_DATA_DIR}")
+    logger.info(f"   📝 Log file: {log_file}")
+    logger.info(f"   🔄 Daily reset at: {RESET_HOUR:02d}:00")
+
+    # ─── Apply permanent blocks + DNS anti-bypass ───
+    from core import hosts_manager, firewall_manager
+
+    hosts_manager.block_permanent_domains()
+    firewall_manager.block_alternative_dns()
+
+    for platform in ALL_PLATFORMS:
+        hosts_manager.block_platform(platform)
+
+    # ─── Tkinter Root (hidden) ───
+    root: tk.Tk = tk.Tk()
+    root.withdraw()
+
+    # ─── Blackout ───
+    from ui.blackout import ScreenBlackout, load_persisted_blackout
+
+    blackout: ScreenBlackout = ScreenBlackout(
+        root=root,
+        on_complete=lambda: logger.info("🌌 Focus session completed!"),
+    )
+
+    def start_blackout(minutes: int) -> None:
+        """Start a blackout from any thread (schedules on main thread)."""
+        root.after(0, lambda: blackout.start(minutes))
+
+    # ─── Crash recovery: resume persisted blackout ───
+    persisted_minutes: int | None = load_persisted_blackout()
+    if persisted_minutes is not None:
+        logger.info(
+            f"🔄 Recovering blackout from crash: {persisted_minutes}m remaining."
+        )
+        root.after(1500, lambda: blackout.start(persisted_minutes))
+
+    # ─── Control Panel (lazy-created) ───
+    _panel_ref: list = [None]
+
+    def open_panel() -> None:
+        """Open the control panel window (create if not exists)."""
+        from ui.control_panel import ControlPanel
+
+        def _open():
+            if _panel_ref[0] is None or not _panel_ref[0].winfo_exists():
+                _panel_ref[0] = ControlPanel(
+                    master=root,
+                    on_start_blackout=start_blackout,
+                )
+            else:
+                _panel_ref[0].show()
+
+        root.after(0, _open)
+
+    # ─── System Tray (background thread) ───
+    from ui.tray import DarkPauseTray
+
+    tray: DarkPauseTray = DarkPauseTray(
+        on_open_panel=open_panel,
+        on_start_blackout=start_blackout,
+    )
+
+    def run_tray() -> None:
+        """Run the tray icon in a background thread."""
         try:
-            t = self.hour_entry.get(); d = int(self.hour_duration.get())
-            datetime.strptime(t, "%H:%M")
-            self.scheduled_tasks.append({"type": "fixed", "time": t, "duration": d, "active": True})
-            self.update_list()
-        except: messagebox.showerror("Error", "Formato inválido (HH:MM)")
+            tray.run()
+        except Exception as e:
+            logger.error(f"Tray crashed: {e}", exc_info=True)
+        finally:
+            root.after(0, root.quit)
 
-    def add_timer_task(self):
+    tray_thread: threading.Thread = threading.Thread(
+        target=run_tray, daemon=True, name="tray",
+    )
+    tray_thread.start()
+
+    # ─── Integrity check loop (every 30s) ───
+    def _integrity_check() -> None:
+        """
+        Periodic verification that protection layers are intact.
+
+        Checks:
+        1. Permanent adult content blocks in hosts file
+        2. DNS anti-bypass firewall rules
+        """
         try:
-            w = int(self.wait_min.get()); d = int(self.wait_dur.get())
-            t = (datetime.now() + timedelta(minutes=w)).strftime("%H:%M:%S")
-            self.scheduled_tasks.append({"time": t, "duration": d, "active": True, "type": "timer"})
-            self.update_list()
-        except: messagebox.showerror("Error", "Números inválidos")
+            hosts_manager.verify_permanent_blocks()
+            if not firewall_manager.is_dns_locked():
+                logger.warning("⚠️ DNS lock was removed! Re-applying...")
+                firewall_manager.block_alternative_dns()
+        except Exception as e:
+            logger.error(f"Integrity check error: {e}")
+        finally:
+            root.after(_INTEGRITY_CHECK_MS, _integrity_check)
 
-    def add_preset(self, w, d):
-        t = (datetime.now() + timedelta(minutes=w)).strftime("%H:%M:%S")
-        self.scheduled_tasks.append({"time": t, "duration": d, "active": True, "type": "timer"})
-        self.update_list()
+    root.after(_INTEGRITY_CHECK_MS, _integrity_check)
 
-    def update_list(self):
-        self.task_listbox.delete(0, tk.END)
-        for t in self.scheduled_tasks:
-            self.task_listbox.insert(tk.END, f"{'⏰' if t.get('type')=='fixed' else '⏳'} {t['time']} -> {t['duration']}m")
+    logger.info("✅ All systems initialized. Entering main loop.")
 
-    def time_monitor(self):
-        while self.running:
-            now = datetime.now()
-            t_short = now.strftime("%H:%M"); t_long = now.strftime("%H:%M:%S")
-            
-            for task in self.scheduled_tasks:
-                if task['active']:
-                    if (task.get('type') == 'fixed' and t_short == task['time']) or \
-                       (task.get('type') == 'timer' and t_long == task['time']):
-                        task['active'] = False
-                        self.after(0, lambda t=task: self.start_blackout(t['duration']))
-                        self.after(0, self.update_list)
-            time.sleep(1)
+    # ─── Main Loop ───
+    try:
+        root.mainloop()
+    except KeyboardInterrupt:
+        logger.info("🛑 Interrupted by user.")
+    finally:
+        # Fail-safe: block everything on exit
+        logger.info("🔒 Fail-safe: blocking all platforms on exit.")
 
-    def start_blackout(self, minutes):
-        if self.blackout_active: return
-        self.blackout_active = True
-        
-        # Overlay Nativo Robusto
-        self.overlays = []
+        for platform in ALL_PLATFORMS:
+            try:
+                hosts_manager.block_platform(platform)
+            except Exception:
+                pass
         try:
-            from screeninfo import get_monitors
-            monitors = get_monitors()
-        except:
-            monitors = [type('obj', (), {'x':0, 'y':0, 'width':self.winfo_screenwidth(), 'height':self.winfo_screenheight()})]
+            hosts_manager.block_permanent_domains()
+        except Exception:
+            pass
+        # NOTE: DNS lock is intentionally NOT removed on exit.
+        # It persists to protect permanent blocks across restarts.
 
-        for m in monitors:
-            win = tk.Toplevel(self)
-            win.geometry(f"{m.width}x{m.height}+{m.x}+{m.y}")
-            win.attributes("-topmost", True)
-            win.overrideredirect(True)
-            win.configure(bg="black")
-            win.config(cursor="none")
-            win.protocol("WM_DELETE_WINDOW", lambda: None)
-            
-            if m.x == 0: # Monitor principal
-                tk.Label(win, text="FOCUS MODE", bg="black", fg="#222222", font=("Segoe UI", 20, "bold")).pack(expand=True)
-            
-            self.overlays.append(win)
+        if _instance_socket:
+            try:
+                _instance_socket.close()
+            except Exception:
+                pass
 
-        def end():
-            self.blackout_active = False
-            for o in self.overlays: o.destroy()
-            self.overlays = []
+        logger.info("👋 DarkPause stopped.")
 
-        self.after(int(minutes * 60000), end)
-        
-        # Focus Loop Robusto
-        def keep_focus():
-            if self.blackout_active:
-                for o in self.overlays:
-                    o.lift()
-                    if o.winfo_x() == 0: o.focus_force()
-                self.after(500, keep_focus)
-        keep_focus()
 
 if __name__ == "__main__":
-    check_single_instance()
-    app = DarkPauseApp()
-    app.mainloop()
+    main()
