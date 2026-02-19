@@ -20,6 +20,11 @@ import threading
 import tkinter as tk
 from pathlib import Path
 
+# ─── Windows AppUserModelID ───
+# Tell Windows this is a standalone app, not "pythonw.exe".
+# This gives DarkPause its own taskbar icon and identity.
+ctypes.windll.shell32.SetCurrentProcessAppUserModelID("darkpause.app.2.1")
+
 logger = logging.getLogger("darkpause")
 
 # ─── Single Instance ───
