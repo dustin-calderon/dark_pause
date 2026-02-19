@@ -203,3 +203,28 @@ Refinamientos adicionales aplicados manualmente al `control_panel.py`:
 - [x] Auto-start: `sys.path.insert` + `os.chdir` para CWD correcto desde Task Scheduler
 - [x] Auto-start: `open_panel()` con try/except + logging para diagnóstico
 - [x] Documentación: TROUBLESHOOTING.md actualizado con secciones 8-10 (auto-start)
+
+---
+
+## 🔧 Post-Implementation: UI Refactoring (2026-02-19)
+
+Tras completar Tier S, el panel fue refactorizado para mejorar mantenibilidad y UX:
+
+| Cambio               | Detalle                                                                                          |
+| :------------------- | :----------------------------------------------------------------------------------------------- |
+| **Modularización**   | `control_panel.py` → orquestador. Lógica movida a `ui/sections/` (5 módulos)                     |
+| **Design Tokens**    | Nuevo `ui/theme.py` centraliza colores, fuentes y spacing                                        |
+| **Widgets**          | `ui/widgets.py` con `CollapsibleFrame` reutilizable                                              |
+| **Web Blocking**     | `ui/sections/web_block.py` — Freedom-style: seleccionar → duración → countdown → auto-desbloqueo |
+| **Secciones Toggle** | Todas las secciones son colapsables (click en header para expandir/colapsar)                     |
+
+### Archivos nuevos:
+
+- `ui/theme.py` — Design tokens
+- `ui/widgets.py` — `CollapsibleFrame`
+- `ui/sections/__init__.py` — Package exports
+- `ui/sections/blackout.py` — 🌌 Bloquear Pantalla
+- `ui/sections/web_block.py` — 🚫 Bloquear Webs
+- `ui/sections/schedule.py` — ⏰ Programar
+- `ui/sections/allowlist.py` — 🌐 Deep Work
+- `ui/sections/task_queue.py` — 📋 Pendiente

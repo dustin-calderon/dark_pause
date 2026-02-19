@@ -6,6 +6,8 @@
 
 DarkPause v2.0 es la fusión completada de **InnerCrab** (limitador de plataformas) y **DarkPause** (bloqueador de pantalla). Todas las fases del `PLAN.md` original (Fase 0-7) están **✅ completadas**.
 
+> **Changelog (2026-02-19):** UI refactorizada en módulos (`ui/sections/` + `ui/widgets.py` + `ui/theme.py`). Panel con secciones colapsables. Añadido **🚫 Bloquear Webs** (Freedom-style: seleccionar → duración → countdown → auto-desbloqueo) en `ui/sections/web_block.py`. Ver `PLAN_UI_REDESIGN.md` y `IMPLEMENTATION_TIER_S.md`.
+
 ### Arquitectura Actual
 
 ```

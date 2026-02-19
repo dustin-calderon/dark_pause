@@ -34,17 +34,18 @@ DarkPause no se limita a editar el hosts file. Usa un sistema multicapa inspirad
 
 ## 🔥 Características
 
-- **🖥️ Multi-Monitor:** Detecta y bloquea automáticamente todos tus monitores.
-- **📸 Platform Limiting:** Instagram (10 min/día), YouTube (60 min/día) con timer preciso.
-- **🔞 Permanent Blocking:** 80 dominios de contenido adulto bloqueados 24/7.
-- **🔒 DNS Anti-Bypass:** Bloquea DNS alternativos para que no puedas saltar el hosts file.
+- **🌌 Blackout Mode:** Pantalla negra infranqueable en todos tus monitores por X minutos.
+- **🚫 Web Blocking (Freedom-style):** Bloquea webs específicas por tiempo. Selecciona → duración → countdown → auto-desbloqueo.
 - **🔒 Lock Mode (Nuclear):** Blackout irreversible — una vez activado, NO se puede cancelar.
-- **🔔 Multi-Step Warnings:** Notificaciones a los 5 min y 1 min restantes de cada plataforma.
 - **🌐 Deep Work Mode (Allowlist):** Bloquea TODO internet excepto dominios esenciales de trabajo.
-- **⏰ Schedules Recurrentes:** Programa bloqueos automáticos semanales (ej: Lunes-Viernes 9-17h).
+- **⏰ Schedules Recurrentes:** Programa bloqueos automáticos semanales (ej: L-V 9:00-17:00).
+- **🔞 Bloqueador Permanente:** Bloquea 80+ dominios de contenido adulto. Sin timer, sin desbloqueo.
+- **🖥️ Multi-Monitor:** Detecta y bloquea automáticamente todos tus monitores.
+- **🔒 DNS Anti-Bypass:** Bloquea DNS alternativos para que no puedas saltar el hosts file.
+- **🔔 Multi-Step Warnings:** Notificaciones a los 5 min y 1 min restantes de cada plataforma.
 - **🔄 Crash Recovery:** Si la app crashea durante un blackout, se reanuda automáticamente.
 - **🛡️ Integrity Monitor:** Cada 30s verifica que nadie haya editado el hosts file.
-- **🍅 Pomodoro Shortcuts:** Botones rápidos para flujos 25/5 y 50/10.
+- **🎯 Secciones Colapsables:** Panel organizado en secciones toggle (expandir/colapsar).
 - **👻 Silent Operation:** Corre con `pythonw.exe` — sin ventana de consola.
 - **🔑 Auto-Start:** Se registra en Task Scheduler para arrancar al encender el PC.
 
@@ -74,9 +75,18 @@ D:\Code Projects\dark_pause\
 │   ├── __init__.py
 │   ├── tray.py                    # System Tray (pystray) — proceso principal
 │   ├── blackout.py                # Overlay fullscreen + persistent state
-│   └── control_panel.py           # Panel de control (CustomTkinter)
-│                                    Platform usage dashboard, task queue,
-│                                    schedules, Deep Work toggle, Pomodoro
+│   ├── control_panel.py           # Panel orchestrator (CustomTkinter)
+│   │                                Ensambla secciones, gestiona estado,
+│   │                                task monitor y window lifecycle
+│   ├── theme.py                   # Design tokens (colores, fuentes, spacing)
+│   ├── widgets.py                 # Widgets reutilizables (CollapsibleFrame)
+│   └── sections/                  # Secciones modulares del panel
+│       ├── __init__.py            # Package exports
+│       ├── blackout.py            # 🌌 Bloquear Pantalla (presets, lock, delay)
+│       ├── web_block.py           # 🚫 Bloquear Webs (Freedom-style, countdown)
+│       ├── schedule.py            # ⏰ Programar (una vez + semanal)
+│       ├── allowlist.py           # 🌐 Deep Work (toggle allowlist)
+│       └── task_queue.py          # 📋 Pendiente (cola de tareas)
 │
 ├── scripts/                       # Scripts de Windows
 │   ├── launcher.ahk               # Ctrl+Alt+D → abre panel
@@ -86,7 +96,10 @@ D:\Code Projects\dark_pause\
 ├── run.bat                        # Launcher silencioso con UAC
 ├── install.bat                    # Auto-start + uninstall (Task Scheduler + Firewall)
 ├── requirements.txt               # pystray, Pillow, customtkinter, screeninfo
-├── PLAN.md                        # Plan de migración y decisiones arquitectónicas
+├── PLAN.md                        # Plan de migración v1→v2
+├── PLAN_V2.md                     # Roadmap v2.1-v3.0
+├── PLAN_UI_REDESIGN.md            # Plan del rediseño UI (completado)
+├── IMPLEMENTATION_TIER_S.md       # Implementación features Tier S
 ├── TROUBLESHOOTING.md             # Guía de resolución de problemas
 ├── README.md                      # Este archivo
 └── LICENSE                        # MIT
@@ -107,14 +120,12 @@ DarkPause vive en tu **bandeja de sistema** (cerca del reloj). Haz clic derecho 
 ### Uso desde el Panel de Control
 
 1. Presiona **`Ctrl + Alt + D`** (requiere `launcher.ahk` activo).
-2. Secciones disponibles:
-   - **🔒 Plataformas:** Dashboard con barras de progreso por plataforma (verde/naranja/rojo según uso).
-   - **📅 Programar Hora:** _"Bloquear a las 16:00 durante 60 minutos"._
-   - **⚡ Quick Focus:** _"Bloquear en X minutos por Y minutos"_ + checkbox Lock Mode.
-   - **🍅 Pomodoro:** Clic en `🍅 Pomo 25` o `🍅 Pomo 50` para work/break automático.
-   - **⏰ Schedules:** Programa bloqueos recurrentes semanales (ej: L-V 9:00-17:00).
+2. Secciones disponibles (click en el título para expandir/colapsar):
+   - **🌌 Bloquear Pantalla:** Presets de duración (25/50 min) + custom. Opciones: delay, Lock Mode 🔒, descanso post-sesión.
+   - **🚫 Bloquear Webs:** Selecciona plataformas (Instagram, YouTube) → duración → _"BLOQUEAR WEBS"_. Countdown en vivo, auto-desbloqueo.
+   - **⏰ Programar:** _"Hoy a las 16:00 durante 60 min"_ + schedules recurrentes semanales.
    - **🌐 Deep Work:** Toggle que bloquea TODO internet excepto dominios permitidos.
-   - **📋 Cola de Tareas:** Lista visual de tareas pendientes con indicador de Lock 🔒.
+   - **📋 Pendiente:** Lista visual de tareas pendientes con indicador de Lock 🔒.
 
 ---
 
