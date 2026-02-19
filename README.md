@@ -134,6 +134,8 @@ DarkPause vive en tu **bandeja de sistema** (cerca del reloj). Haz clic derecho 
    pip install -r requirements.txt
    ```
 
+   > ⚠️ **¿Tienes múltiples versiones de Python?** `install.bat` registra la primera `pythonw.exe` que encuentra. Asegúrate de instalar las dependencias con la **misma versión** que usa Task Scheduler. Verifica con: `schtasks /query /tn "DarkPause" /xml | Select-String "Command"`
+
 2. **Ejecutar (primera vez):**
 
    ```bash

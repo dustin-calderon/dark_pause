@@ -1,3 +1,8 @@
 
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
 # Reference repos for inspiration
 .references/

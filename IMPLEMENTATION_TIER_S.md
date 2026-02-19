@@ -196,3 +196,10 @@ Refinamientos adicionales aplicados manualmente al `control_panel.py`:
 - [x] Taskbar: \_loops_active idempotency guard
 - [x] Taskbar: Skip auto-open on crash recovery
 - [x] Documentación: README.md, PLAN_V2.md, IMPLEMENTATION_TIER_S.md actualizados
+- [x] Auto-start: Fix `SetCurrentProcessExplicitAppUserModelID` (nombre Win32 correcto)
+- [x] Auto-start: Paquetes instalados en Python 3.11 (la versión usada por Task Scheduler)
+- [x] Auto-start: `_flush_log()` forzado en secciones críticas para pythonw debugging
+- [x] Auto-start: `install.bat` → XML task con `<WorkingDirectory>` + sin restricción batería
+- [x] Auto-start: `sys.path.insert` + `os.chdir` para CWD correcto desde Task Scheduler
+- [x] Auto-start: `open_panel()` con try/except + logging para diagnóstico
+- [x] Documentación: TROUBLESHOOTING.md actualizado con secciones 8-10 (auto-start)

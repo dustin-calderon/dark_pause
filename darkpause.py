@@ -14,16 +14,28 @@ and starts the system tray + Tkinter event loop.
 
 import ctypes
 import logging
+import os
 import socket
 import sys
 import threading
 import tkinter as tk
 from pathlib import Path
 
+# ─── Ensure correct working directory ───
+# Task Scheduler launches from C:\Windows\System32 — all relative
+# imports (core.*, ui.*) and asset paths would fail without this.
+_SCRIPT_DIR: str = os.path.dirname(os.path.abspath(__file__))
+if _SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPT_DIR)
+os.chdir(_SCRIPT_DIR)
+
 # ─── Windows AppUserModelID ───
 # Tell Windows this is a standalone app, not "pythonw.exe".
 # This gives DarkPause its own taskbar icon and identity.
-ctypes.windll.shell32.SetCurrentProcessAppUserModelID("darkpause.app.2.1")
+try:
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("darkpause.app.2.1")
+except (AttributeError, OSError):
+    pass  # Non-critical — app still works, just shows Python icon
 
 logger = logging.getLogger("darkpause")
 
@@ -212,24 +224,45 @@ def main() -> None:
         from ui.control_panel import ControlPanel
 
         def _open():
-            if _panel_ref[0] is None or not _panel_ref[0].winfo_exists():
-                _panel_ref[0] = ControlPanel(
-                    master=root,
-                    on_start_blackout=start_blackout,
-                    scheduler=scheduler,
-                )
-            else:
-                _panel_ref[0].show()
+            try:
+                if _panel_ref[0] is None or not _panel_ref[0].winfo_exists():
+                    logger.info("📋 Creating control panel...")
+                    _panel_ref[0] = ControlPanel(
+                        master=root,
+                        on_start_blackout=start_blackout,
+                        scheduler=scheduler,
+                    )
+                    logger.info("📋 Control panel created successfully.")
+                else:
+                    _panel_ref[0].show()
+                    logger.info("📋 Control panel restored.")
+            except Exception as e:
+                logger.error(f"❌ Failed to open control panel: {e}", exc_info=True)
 
         root.after(0, _open)
 
     # ─── System Tray (background thread) ───
-    from ui.tray import DarkPauseTray
+    def _flush_log() -> None:
+        """Force flush all log handlers (critical for pythonw)."""
+        for handler in logging.getLogger().handlers:
+            handler.flush()
 
-    tray: DarkPauseTray = DarkPauseTray(
-        on_open_panel=open_panel,
-        on_start_blackout=start_blackout,
-    )
+    try:
+        logger.info("🔧 Importing tray module...")
+        _flush_log()
+        from ui.tray import DarkPauseTray
+
+        logger.info("🔧 Creating tray icon...")
+        _flush_log()
+        tray: DarkPauseTray = DarkPauseTray(
+            on_open_panel=open_panel,
+            on_start_blackout=start_blackout,
+        )
+        logger.info("🔧 Tray icon created.")
+        _flush_log()
+    except Exception as e:
+        logger.error(f"❌ Tray initialization failed: {e}", exc_info=True)
+        _flush_log()
 
     def run_tray() -> None:
         """Run the tray icon in a background thread."""
@@ -237,6 +270,7 @@ def main() -> None:
             tray.run()
         except Exception as e:
             logger.error(f"Tray crashed: {e}", exc_info=True)
+            _flush_log()
         finally:
             root.after(0, root.quit)
 
@@ -244,10 +278,14 @@ def main() -> None:
         target=run_tray, daemon=True, name="tray",
     )
     tray_thread.start()
+    logger.info("🔧 Tray thread started.")
+    _flush_log()
 
     # ─── Auto-open panel on boot (skip if recovering from crash blackout) ───
     if persisted is None:
-        root.after(2000, open_panel)
+        root.after(5000, open_panel)
+        logger.info("🔧 Auto-open panel scheduled (5s delay).")
+        _flush_log()
 
     # ─── Integrity check loop (every 30s) ───
     def _integrity_check() -> None:
@@ -271,6 +309,7 @@ def main() -> None:
     root.after(_INTEGRITY_CHECK_MS, _integrity_check)
 
     logger.info("✅ All systems initialized. Entering main loop.")
+    _flush_log()
 
     # ─── Main Loop ───
     try:

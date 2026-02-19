@@ -72,6 +72,46 @@ Esto elimina:
 
 **Nota:** Los bloqueos del hosts file NO se eliminan automáticamente por seguridad. Para limpiarlos manualmente, edita `C:\Windows\System32\drivers\etc\hosts` y elimina todas las líneas entre los marcadores `# >>> DARKPAUSE-...-START <<<` y `# >>> DARKPAUSE-...-END <<<`.
 
+## 8. DarkPause no arranca automáticamente al encender el PC
+
+- **Causa A:** La tarea de Task Scheduler no tiene `WorkingDirectory`.
+  - Task Scheduler lanza el proceso desde `C:\Windows\System32`, lo que rompe los `from core.* import ...` relativos.
+  - **Solución:** Re-ejecutar `install.bat` como Administrador. La versión actual crea la tarea con un XML que incluye `<WorkingDirectory>` apuntando a la carpeta del proyecto.
+- **Causa B:** Los paquetes están instalados en otra versión de Python.
+  - `install.bat` registra `pythonw.exe` de una versión específica (ej: Python 3.11). Si instalaste las dependencias con `pip install` de otra versión (ej: Python 3.14), Task Scheduler no las encontrará.
+  - **Diagnóstico:** Revisa qué Python usa la tarea:
+    ```ps1
+    schtasks /query /tn "DarkPause" /xml | Select-String "Command"
+    ```
+    E instala las dependencias con esa versión específica:
+    ```ps1
+    & "C:\...\Python311\python.exe" -m pip install -r requirements.txt
+    ```
+- **Causa C:** Crash silencioso con `pythonw.exe`.
+  - `pythonw.exe` no tiene consola — los errores de stderr son **completamente invisibles**.
+  - **Diagnóstico:** Ejecuta manualmente con `python.exe` (con consola) para ver el error:
+    ```ps1
+    & "C:\...\Python311\python.exe" "D:\Code Projects\dark_pause\darkpause.py"
+    ```
+  - **Diagnóstico alternativo:** Revisa el log en `%APPDATA%\DarkPause\darkpause.log`. Si el log se corta abruptamente sin "✅ All systems initialized", el crash ocurrió antes de esa línea.
+
+## 9. El panel no se abre automáticamente (pero el tray sí funciona)
+
+- **Causa:** El tray icon está activo pero `open_panel()` falló silenciosamente.
+- **Diagnóstico:** Busca en el log:
+  ```ps1
+  Select-String "panel|Creating|Failed" "$env:APPDATA\DarkPause\darkpause.log"
+  ```
+
+  - Si ves `📋 Creating control panel...` pero NO `📋 Control panel created successfully.`, la creación del panel crasheó.
+  - Si no ves ningún mensaje de panel, el proceso murió antes de llegar a esa fase.
+- **Solución:** Asegúrate de que `customtkinter` esté instalado en la misma versión de Python que usa Task Scheduler (ver sección 8).
+
+## 10. Ctrl+Alt+D pide aprobación de Administrador (UAC)
+
+- **Causa:** El AHK launcher no encuentra la ventana "darkpause" (porque el tray process crasheó), así que lanza una nueva instancia que requiere UAC.
+- **Solución:** Asegúrate de que DarkPause esté corriendo correctamente vía Task Scheduler (ver sección 8). Si el trayicon está activo y el panel se abrió correctamente, Ctrl+Alt+D solo lo minimiza/restaura — sin UAC.
+
 ---
 
 _Si el problema persiste, abre un Issue en el repositorio._
