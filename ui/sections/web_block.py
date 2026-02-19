@@ -17,6 +17,12 @@ from tkinter import messagebox
 import customtkinter as ctk
 
 from core.config import ALL_PLATFORMS, APP_DATA_DIR, Platform
+from core.permanent_blocks import (
+    PRESETS,
+    add_block,
+    load_user_blocks,
+    remove_block,
+)
 from ui.theme import (
     COLOR_DANGER,
     COLOR_PRIMARY,
@@ -73,6 +79,7 @@ class WebBlockSection(ctk.CTkFrame):
         self._build_duration_row()
         self._build_action_button()
         self._build_status_bar()
+        self._build_permanent_blocks()
 
     def _build_platform_list(self) -> None:
         """Build checkboxes for each configured platform."""
@@ -477,3 +484,189 @@ class WebBlockSection(ctk.CTkFrame):
         except Exception as e:
             logger.warning(f"Failed to restore web block session: {e}")
             self._clear_state()
+
+    # ─── Permanent Blocks UI ───
+
+    def _build_permanent_blocks(self) -> None:
+        """Build the permanent blocks management sub-section."""
+        # Separator
+        ctk.CTkFrame(self, height=1, fg_color=COLOR_SURFACE).pack(
+            fill="x", padx=10, pady=(15, 5),
+        )
+
+        # Header
+        ctk.CTkLabel(
+            self, text="🔒  Bloqueos permanentes", font=FONT_BODY,
+        ).pack(anchor="w", padx=10, pady=(5, 2))
+
+        ctk.CTkLabel(
+            self,
+            text="Siempre bloqueados. Sin temporizador.",
+            font=FONT_SMALL,
+            text_color=COLOR_TEXT_MUTED,
+        ).pack(anchor="w", padx=10, pady=(0, 5))
+
+        # Scrollable list of active blocks
+        self._perm_list_frame = ctk.CTkScrollableFrame(
+            self, height=90, fg_color=COLOR_SURFACE, corner_radius=6,
+        )
+        self._perm_list_frame.pack(fill="x", padx=10, pady=(0, 5))
+        self._refresh_permanent_list()
+
+        # Quick-add preset row
+        preset_frame = ctk.CTkFrame(self, fg_color="transparent")
+        preset_frame.pack(fill="x", padx=10, pady=(0, 5))
+
+        ctk.CTkLabel(
+            preset_frame, text="Añadir:", font=FONT_SMALL,
+            text_color=COLOR_TEXT_MUTED,
+        ).pack(side="left", padx=(0, 5))
+
+        existing_labels: set[str] = {
+            b.get("label", "") for b in load_user_blocks()
+        }
+        for preset in PRESETS:
+            label: str = preset["label"]
+            domains: list[str] = preset["domains"]
+            btn = ctk.CTkButton(
+                preset_frame,
+                text=label,
+                width=70,
+                height=24,
+                font=FONT_SMALL,
+                fg_color=COLOR_SURFACE,
+                hover_color=COLOR_PRIMARY_HOVER,
+                command=lambda l=label, d=domains: self._add_permanent(l, d),
+            )
+            btn.pack(side="left", padx=2)
+
+        # Custom domain input row
+        custom_frame = ctk.CTkFrame(self, fg_color="transparent")
+        custom_frame.pack(fill="x", padx=10, pady=(0, 5))
+
+        self._custom_label_entry = ctk.CTkEntry(
+            custom_frame, placeholder_text="Nombre",
+            width=80, height=28, font=FONT_SMALL,
+        )
+        self._custom_label_entry.pack(side="left", padx=(0, 5))
+
+        self._custom_domain_entry = ctk.CTkEntry(
+            custom_frame, placeholder_text="dominio.com, otro.com",
+            width=170, height=28, font=FONT_SMALL,
+        )
+        self._custom_domain_entry.pack(side="left", padx=(0, 5), expand=True, fill="x")
+
+        ctk.CTkButton(
+            custom_frame,
+            text="+ Añadir",
+            width=70,
+            height=28,
+            font=FONT_SMALL,
+            fg_color=COLOR_PRIMARY,
+            hover_color=COLOR_PRIMARY_HOVER,
+            command=self._add_custom_permanent,
+        ).pack(side="left")
+
+    def _refresh_permanent_list(self) -> None:
+        """Refresh the scrollable list of active permanent blocks."""
+        for widget in self._perm_list_frame.winfo_children():
+            widget.destroy()
+
+        user_blocks: list[dict] = load_user_blocks()
+
+        if not user_blocks:
+            ctk.CTkLabel(
+                self._perm_list_frame,
+                text="No hay bloqueos permanentes personalizados.",
+                font=FONT_SMALL,
+                text_color=COLOR_TEXT_MUTED,
+            ).pack(anchor="w", padx=5, pady=2)
+            return
+
+        for block in user_blocks:
+            label: str = block.get("label", "?")
+            domains: list[str] = block.get("domains", [])
+
+            row = ctk.CTkFrame(self._perm_list_frame, fg_color="transparent")
+            row.pack(fill="x", pady=1)
+
+            ctk.CTkLabel(
+                row,
+                text=f"🔒 {label}",
+                font=FONT_SMALL,
+                anchor="w",
+            ).pack(side="left", padx=(5, 5))
+
+            ctk.CTkLabel(
+                row,
+                text=f"({len(domains)} dominios)",
+                font=FONT_SMALL,
+                text_color=COLOR_TEXT_MUTED,
+            ).pack(side="left")
+
+            ctk.CTkButton(
+                row,
+                text="❌",
+                width=28,
+                height=22,
+                font=FONT_SMALL,
+                fg_color=COLOR_DANGER,
+                hover_color="#C0392B",
+                command=lambda l=label: self._remove_permanent(l),
+            ).pack(side="right", padx=5)
+
+    def _add_permanent(self, label: str, domains: list[str]) -> None:
+        """
+        Add a permanent block and refresh the hosts file.
+
+        Args:
+            label: Human-readable name.
+            domains: List of domains to block.
+        """
+        from core import hosts_manager
+
+        # Avoid duplicates
+        existing: set[str] = {b.get("label", "") for b in load_user_blocks()}
+        if label in existing:
+            messagebox.showinfo("Info", f"{label} ya está bloqueado.")
+            return
+
+        add_block(label, domains)
+        hosts_manager.block_permanent_domains()
+        self._refresh_permanent_list()
+        logger.info(f"🔒 Permanent block added from UI: {label}")
+
+    def _remove_permanent(self, label: str) -> None:
+        """
+        Remove a permanent block and refresh the hosts file.
+
+        Args:
+            label: The label of the block to remove.
+        """
+        from core import hosts_manager
+
+        remove_block(label)
+        hosts_manager.block_permanent_domains()
+        self._refresh_permanent_list()
+        logger.info(f"🔓 Permanent block removed from UI: {label}")
+
+    def _add_custom_permanent(self) -> None:
+        """Add a custom permanent block from the input fields."""
+        label: str = self._custom_label_entry.get().strip()
+        raw_domains: str = self._custom_domain_entry.get().strip()
+
+        if not label:
+            messagebox.showwarning("Atención", "Introduce un nombre.")
+            return
+        if not raw_domains:
+            messagebox.showwarning("Atención", "Introduce al menos un dominio.")
+            return
+
+        domains: list[str] = [
+            d.strip() for d in raw_domains.replace(" ", ",").split(",")
+            if d.strip()
+        ]
+
+        self._add_permanent(label, domains)
+        self._custom_label_entry.delete(0, "end")
+        self._custom_domain_entry.delete(0, "end")

@@ -246,9 +246,12 @@ def block_permanent_domains() -> bool:
     Returns:
         bool: True if blocking was successful, False otherwise.
     """
-    from .config import PERMANENT_BLOCK_DOMAINS, PERMANENT_BLOCK_TAG
+    from .config import PERMANENT_BLOCK_TAG
+    from .permanent_blocks import get_all_permanent_domains
 
-    if not PERMANENT_BLOCK_DOMAINS:
+    all_domains: list[str] = get_all_permanent_domains()
+
+    if not all_domains:
         logger.debug("No permanent block domains configured.")
         return True
 
@@ -257,8 +260,8 @@ def block_permanent_domains() -> bool:
 
     lines: list[str] = [marker_start]
     lines.append("# DarkPause - Permanent Blocks (DO NOT EDIT)")
-    lines.append(f"# {len(PERMANENT_BLOCK_DOMAINS)} domains blocked")
-    for domain in PERMANENT_BLOCK_DOMAINS:
+    lines.append(f"# {len(all_domains)} domains blocked")
+    for domain in all_domains:
         lines.append(f"{REDIRECT_IP} {domain}")
     lines.append(marker_end)
     block_section: str = "\n".join(lines)
@@ -284,7 +287,7 @@ def block_permanent_domains() -> bool:
             _write_hosts_file(new_content)
             _flush_dns()
             logger.info(
-                f"🔒 Permanent blocks applied: {len(PERMANENT_BLOCK_DOMAINS)} domains."
+                f"🔒 Permanent blocks applied: {len(all_domains)} domains."
             )
             return True
         except PermissionError:

@@ -175,7 +175,19 @@ PERMANENT_BLOCK_TAG: str = "PERMANENT"
 """Marker tag for permanent blocks in hosts file."""
 
 PERMANENT_BLOCK_DOMAINS: list[str] = [
-    # Major sites
+    # Social media (default blocks)
+    "instagram.com", "www.instagram.com",
+    "api.instagram.com", "i.instagram.com",
+    "graph.instagram.com", "l.instagram.com",
+    "static.cdninstagram.com", "scontent.cdninstagram.com",
+    "edge-chat.instagram.com",
+    "youtube.com", "www.youtube.com",
+    "m.youtube.com", "youtu.be",
+    "youtube-nocookie.com", "www.youtube-nocookie.com",
+    "youtubei.googleapis.com",
+    "yt3.ggpht.com", "yt3.googleusercontent.com",
+    "i.ytimg.com", "s.ytimg.com",
+    # Adult content — Major sites
     "pornhub.com", "www.pornhub.com",
     "xvideos.com", "www.xvideos.com",
     "xnxx.com", "www.xnxx.com",
