@@ -26,22 +26,28 @@ _STATE_FILE: Path = APP_DATA_DIR / "blackout_state.json"
 # ─── Persistent State Helpers ───
 
 
-def _save_blackout_state(end_time: datetime, duration: int) -> None:
+def _save_blackout_state(
+    end_time: datetime,
+    duration: int,
+    locked: bool = False,
+) -> None:
     """
     Save blackout state to disk for crash recovery.
 
     Args:
         end_time: When the blackout should end.
         duration: Original duration in minutes.
+        locked: Whether this blackout is in Lock Mode (irreversible).
     """
     try:
         APP_DATA_DIR.mkdir(parents=True, exist_ok=True)
         data: dict = {
             "end_iso": end_time.isoformat(),
             "duration_minutes": duration,
+            "locked": locked,
         }
         _STATE_FILE.write_text(json.dumps(data), encoding="utf-8")
-        logger.debug(f"Blackout state saved: ends at {end_time.isoformat()}")
+        logger.debug(f"Blackout state saved: ends at {end_time.isoformat()}, locked={locked}")
     except Exception as e:
         logger.warning(f"Failed to save blackout state: {e}")
 
@@ -54,12 +60,12 @@ def _clear_blackout_state() -> None:
         pass
 
 
-def load_persisted_blackout() -> int | None:
+def load_persisted_blackout() -> tuple[int, bool] | None:
     """
     Check for a persisted blackout from a previous crash.
 
     Returns:
-        int | None: Remaining minutes if a valid blackout exists, else None.
+        tuple[int, bool] | None: (remaining_minutes, locked) if valid, else None.
     """
     try:
         if not _STATE_FILE.exists():
@@ -67,9 +73,10 @@ def load_persisted_blackout() -> int | None:
         raw: str = _STATE_FILE.read_text(encoding="utf-8")
         data: dict = json.loads(raw)
         end_time: datetime = datetime.fromisoformat(data["end_iso"])
+        locked: bool = data.get("locked", False)
         remaining_secs: float = (end_time - datetime.now()).total_seconds()
         if remaining_secs > 60:  # At least 1 minute left
-            return max(1, int(remaining_secs / 60))
+            return max(1, int(remaining_secs / 60)), locked
         # Expired — clean up
         _clear_blackout_state()
         return None
@@ -103,6 +110,7 @@ class ScreenBlackout:
         self._on_complete: Optional[Callable[[], None]] = on_complete
         self._overlays: list[tk.Toplevel] = []
         self._is_active: bool = False
+        self._is_locked: bool = False
         self._end_time: Optional[datetime] = None
         self._timer_id: Optional[str] = None
         self._focus_id: Optional[str] = None
@@ -113,6 +121,11 @@ class ScreenBlackout:
         return self._is_active
 
     @property
+    def is_locked(self) -> bool:
+        """Whether the blackout is in Lock Mode (cannot be cancelled)."""
+        return self._is_active and self._is_locked
+
+    @property
     def remaining_seconds(self) -> float:
         """Seconds remaining in the current blackout session."""
         if not self._is_active or not self._end_time:
@@ -120,7 +133,7 @@ class ScreenBlackout:
         delta: float = (self._end_time - datetime.now()).total_seconds()
         return max(0.0, delta)
 
-    def start(self, minutes: int) -> None:
+    def start(self, minutes: int, locked: bool = False) -> None:
         """
         Start a blackout session for the given number of minutes.
 
@@ -128,13 +141,16 @@ class ScreenBlackout:
 
         Args:
             minutes: Duration of the blackout in minutes.
+            locked: If True, enables Lock Mode — blackout cannot be cancelled.
         """
         if self._is_active:
             logger.warning("Blackout already active, ignoring start request.")
             return
 
-        logger.info(f"🌌 Starting blackout for {minutes} minutes.")
+        lock_label: str = " [LOCKED]" if locked else ""
+        logger.info(f"🌌 Starting blackout for {minutes} minutes.{lock_label}")
         self._is_active = True
+        self._is_locked = locked
         self._end_time = datetime.now() + timedelta(minutes=minutes)
         self._overlays = []
 
@@ -168,11 +184,13 @@ class ScreenBlackout:
                 )
                 self._timer_label.place(relx=0.5, rely=0.5, anchor="center")
 
+                subtitle_text: str = "🔒 LOCKED — NO ESCAPE" if locked else "FOCUS MODE"
+                subtitle_color: str = "#2d1010" if locked else "#1a1a1a"
                 subtitle = tk.Label(
                     overlay,
-                    text="FOCUS MODE",
+                    text=subtitle_text,
                     bg="black",
-                    fg="#1a1a1a",
+                    fg=subtitle_color,
                     font=("Segoe UI", 14),
                 )
                 subtitle.place(relx=0.5, rely=0.58, anchor="center")
@@ -180,17 +198,27 @@ class ScreenBlackout:
             self._overlays.append(overlay)
 
         # Persist state for crash recovery
-        _save_blackout_state(self._end_time, minutes)
+        _save_blackout_state(self._end_time, minutes, locked=locked)
 
         # Start timer update loop
         self._update_timer()
         # Start focus enforcement loop
         self._keep_focus()
 
-    def stop(self) -> None:
-        """Stop the blackout and destroy all overlays."""
+    def stop(self, force: bool = False) -> None:
+        """
+        Stop the blackout and destroy all overlays.
+
+        Args:
+            force: If True, bypass Lock Mode protection (used by timer expiry only).
+        """
+        if self._is_locked and not force:
+            logger.warning("🔒 Lock Mode active — stop request DENIED.")
+            return
+
         logger.info("🌌 Blackout ended.")
         self._is_active = False
+        self._is_locked = False
         self._end_time = None
 
         # Clear persisted state
@@ -224,7 +252,7 @@ class ScreenBlackout:
 
         remaining: float = self.remaining_seconds
         if remaining <= 0:
-            self.stop()
+            self.stop(force=True)
             if self._on_complete:
                 self._on_complete()
             return

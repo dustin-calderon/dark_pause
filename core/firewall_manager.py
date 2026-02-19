@@ -21,7 +21,10 @@ an acceptable trade-off for a digital discipline tool.
 """
 
 import logging
+import socket
 import subprocess
+import threading
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -179,4 +182,263 @@ def cleanup_all_rules() -> None:
     """
     _delete_rule(_DNS_RULE_NAME)
     _delete_rule(_DOT_RULE_NAME)
+    disable_allowlist_mode()
     logger.info("🧹 All DarkPause firewall rules cleaned up.")
+
+
+# ─── Allowlist Mode (Deep Work) ───
+
+_ALLOWLIST_BLOCK_ALL_RULE: str = f"{_RULE_PREFIX}-Allowlist-BlockAll"
+_ALLOWLIST_ALLOW_PREFIX: str = f"{_RULE_PREFIX}-Allowlist-Allow"
+_allowlist_active: bool = False
+_allowlist_thread: threading.Thread | None = None
+_allowlist_stop_event: threading.Event = threading.Event()
+
+# State file for crash recovery
+_ALLOWLIST_STATE_FILE: Path | None = None
+
+
+def _get_allowlist_state_file() -> Path:
+    """Lazy-load the state file path (avoids circular import at module level)."""
+    global _ALLOWLIST_STATE_FILE
+    if _ALLOWLIST_STATE_FILE is None:
+        from core.config import APP_DATA_DIR
+        _ALLOWLIST_STATE_FILE = APP_DATA_DIR / "allowlist_active.flag"
+    return _ALLOWLIST_STATE_FILE
+
+
+def _persist_allowlist_state(active: bool) -> None:
+    """Persist allowlist active flag to disk for crash recovery."""
+    try:
+        state_file: Path = _get_allowlist_state_file()
+        if active:
+            state_file.parent.mkdir(parents=True, exist_ok=True)
+            state_file.write_text("1", encoding="utf-8")
+        else:
+            state_file.unlink(missing_ok=True)
+    except Exception as e:
+        logger.debug(f"Allowlist state persist error: {e}")
+
+
+def cleanup_orphaned_allowlist() -> None:
+    """
+    Remove orphaned allowlist firewall rules from a previous crash.
+
+    Should be called during app startup. If the state file exists but
+    the app wasn't running, it means a crash left rules behind.
+    """
+    try:
+        state_file: Path = _get_allowlist_state_file()
+        if state_file.exists():
+            logger.warning("⚠️ Orphaned allowlist rules detected. Cleaning up...")
+            _delete_rule(_ALLOWLIST_BLOCK_ALL_RULE)
+            for suffix in ["0", "local"]:
+                _delete_rule(f"{_ALLOWLIST_ALLOW_PREFIX}-{suffix}")
+            state_file.unlink(missing_ok=True)
+            logger.info("✅ Orphaned allowlist rules cleaned.")
+    except Exception as e:
+        logger.warning(f"Orphaned allowlist cleanup error: {e}")
+
+
+def _resolve_domain_ips(domain: str) -> set[str]:
+    """
+    Resolve a domain name to its IP addresses.
+
+    Args:
+        domain: The domain name to resolve.
+
+    Returns:
+        set[str]: Set of resolved IPv4 addresses.
+    """
+    ips: set[str] = set()
+    try:
+        results = socket.getaddrinfo(domain, None, socket.AF_INET)
+        for result in results:
+            ips.add(result[4][0])
+    except socket.gaierror as e:
+        logger.debug(f"Could not resolve {domain}: {e}")
+    except Exception as e:
+        logger.warning(f"DNS resolution error for {domain}: {e}")
+    return ips
+
+
+def _get_all_allowed_ips(domains: list[str]) -> set[str]:
+    """
+    Resolve all allowlist domains and return combined IP set.
+
+    Always includes essential system IPs to prevent total network breakage.
+
+    Args:
+        domains: List of domain names to resolve.
+
+    Returns:
+        set[str]: Combined set of all allowed IPs.
+    """
+    # Essential IPs that must always be reachable
+    allowed: set[str] = {
+        "127.0.0.1",       # localhost
+        "255.255.255.255", # broadcast
+    }
+
+    for domain in domains:
+        resolved: set[str] = _resolve_domain_ips(domain)
+        if resolved:
+            logger.debug(f"Resolved {domain} -> {resolved}")
+            allowed.update(resolved)
+
+    return allowed
+
+
+def _apply_allowlist_rules(allowed_ips: set[str]) -> bool:
+    """
+    Apply firewall rules: block all outbound, then allow specific IPs.
+
+    Args:
+        allowed_ips: Set of IP addresses to allow through the firewall.
+
+    Returns:
+        bool: True if block-all rule was applied successfully.
+    """
+    # Remove existing allowlist rules first
+    _delete_rule(_ALLOWLIST_BLOCK_ALL_RULE)
+    # Delete known allow rules (fast, no probing loop)
+    for suffix in ["0", "local"]:
+        _delete_rule(f"{_ALLOWLIST_ALLOW_PREFIX}-{suffix}")
+
+    # Create Block All Outbound rule
+    block_ok, block_out = _run_netsh([
+        "advfirewall", "firewall", "add", "rule",
+        f"name={_ALLOWLIST_BLOCK_ALL_RULE}",
+        "dir=out", "action=block",
+        "protocol=any",
+        "enable=yes",
+    ])
+
+    if not block_ok:
+        logger.error(f"Failed to create block-all rule: {block_out}")
+        return False
+
+    logger.info("🚫 Allowlist: Block All Outbound rule applied.")
+
+    # Create Allow rules for each IP
+    ip_list: list[str] = sorted(allowed_ips)
+    # netsh supports comma-separated IPs in a single rule
+    if ip_list:
+        ip_csv: str = ",".join(ip_list)
+        allow_ok, allow_out = _run_netsh([
+            "advfirewall", "firewall", "add", "rule",
+            f"name={_ALLOWLIST_ALLOW_PREFIX}-0",
+            "dir=out", "action=allow",
+            "protocol=any",
+            f"remoteip={ip_csv}",
+            "enable=yes",
+        ])
+        if allow_ok:
+            logger.info(f"✅ Allowlist: Allowed {len(ip_list)} IPs.")
+        else:
+            logger.warning(f"Failed to create allow rule: {allow_out}")
+
+    # Always allow local network (DHCP, gateway, etc.)
+    _run_netsh([
+        "advfirewall", "firewall", "add", "rule",
+        f"name={_ALLOWLIST_ALLOW_PREFIX}-local",
+        "dir=out", "action=allow",
+        "protocol=any",
+        "remoteip=LocalSubnet",
+        "enable=yes",
+    ])
+
+    return True
+
+
+def _allowlist_refresh_loop(domains: list[str], interval: int) -> None:
+    """
+    Background loop that periodically re-resolves allowlist IPs.
+
+    CDN IPs change frequently, so we need to keep rules updated.
+
+    Args:
+        domains: List of domain names to resolve.
+        interval: Seconds between refresh cycles.
+    """
+    while not _allowlist_stop_event.is_set():
+        _allowlist_stop_event.wait(timeout=interval)
+        if _allowlist_stop_event.is_set():
+            break
+        logger.debug("🔄 Allowlist: refreshing domain IPs...")
+        allowed_ips: set[str] = _get_all_allowed_ips(domains)
+        _apply_allowlist_rules(allowed_ips)
+
+
+def enable_allowlist_mode() -> bool:
+    """
+    Enable Allowlist / Deep Work mode.
+
+    Blocks ALL outbound internet traffic except for domains in
+    ALLOWLIST_DOMAINS. Starts a background thread to periodically
+    re-resolve domain IPs.
+
+    Returns:
+        bool: True if allowlist mode was enabled successfully.
+    """
+    global _allowlist_active, _allowlist_thread
+
+    from core.config import ALLOWLIST_DOMAINS, ALLOWLIST_REFRESH_SECONDS
+
+    if _allowlist_active:
+        logger.warning("Allowlist mode already active.")
+        return True
+
+    logger.info("🌐 Enabling Allowlist / Deep Work mode...")
+
+    # BUG-3 FIX: Clear stop event BEFORE applying rules, so the refresh
+    # thread always starts clean even if a previous enable/disable cycle
+    # left the event in a set state.
+    _allowlist_stop_event.clear()
+
+    allowed_ips: set[str] = _get_all_allowed_ips(ALLOWLIST_DOMAINS)
+    if not _apply_allowlist_rules(allowed_ips):
+        return False
+
+    _allowlist_active = True
+
+    _allowlist_thread = threading.Thread(
+        target=_allowlist_refresh_loop,
+        args=(ALLOWLIST_DOMAINS, ALLOWLIST_REFRESH_SECONDS),
+        daemon=True,
+        name="allowlist-refresh",
+    )
+    _allowlist_thread.start()
+
+    logger.info("✅ Allowlist mode ACTIVE. Only allowed domains are reachable.")
+    _persist_allowlist_state(active=True)
+    return True
+
+
+def disable_allowlist_mode() -> None:
+    """
+    Disable Allowlist / Deep Work mode.
+
+    Removes all allowlist firewall rules and stops the refresh thread.
+    Internet access is fully restored.
+    """
+    global _allowlist_active, _allowlist_thread
+
+    _allowlist_stop_event.set()
+    if _allowlist_thread and _allowlist_thread.is_alive():
+        _allowlist_thread.join(timeout=5)
+    _allowlist_thread = None
+
+    _delete_rule(_ALLOWLIST_BLOCK_ALL_RULE)
+    # Clean up allow rules
+    for suffix in ["0", "local"]:
+        _delete_rule(f"{_ALLOWLIST_ALLOW_PREFIX}-{suffix}")
+
+    _allowlist_active = False
+    _persist_allowlist_state(active=False)
+    logger.info("🔓 Allowlist mode DISABLED. Full internet restored.")
+
+
+def is_allowlist_active() -> bool:
+    """Check if Allowlist / Deep Work mode is currently active."""
+    return _allowlist_active

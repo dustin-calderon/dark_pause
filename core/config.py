@@ -128,8 +128,11 @@ def get_platform_by_id(platform_id: str) -> Platform | None:
 RESET_HOUR: int = 4
 """Hour of the day (0-23) when all daily usage counters reset. Default: 4 AM."""
 
-WARNING_THRESHOLD_MINUTES: int = 2
-"""Minutes remaining before showing a warning notification."""
+WARNING_STEPS: list[int] = [5, 1]
+"""Minutes remaining at which to send warning notifications (descending)."""
+
+WARNING_THRESHOLD_MINUTES: int = max(WARNING_STEPS)
+"""Derived: earliest warning threshold (for tray icon state)."""
 
 REDIRECT_IP: str = "127.0.0.1"
 """IP address to redirect blocked domains to."""
@@ -212,6 +215,33 @@ PERMANENT_BLOCK_DOMAINS: list[str] = [
     "nhentai.net", "www.nhentai.net",
 ]
 """Domains permanently blocked via hosts file. No timer, no unblock."""
+
+# ─────────────────────────────────────────────
+# Allowlist Mode (Deep Work)
+# ─────────────────────────────────────────────
+ALLOWLIST_DOMAINS: list[str] = [
+    # Work essentials
+    "docs.google.com",
+    "drive.google.com",
+    "mail.google.com",
+    "calendar.google.com",
+    "meet.google.com",
+    # Dev tools
+    "stackoverflow.com",
+    "github.com",
+    "gitlab.com",
+    "pypi.org",
+    "npmjs.com",
+    "developer.mozilla.org",
+    # Communication
+    "slack.com",
+    "notion.so",
+    "linear.app",
+]
+"""Domains allowed during Allowlist / Deep Work mode. Everything else is blocked."""
+
+ALLOWLIST_REFRESH_SECONDS: int = 300
+"""How often to re-resolve allowlist domain IPs (seconds). CDN IPs change."""
 
 # ─────────────────────────────────────────────
 # Colors (for icon generation)

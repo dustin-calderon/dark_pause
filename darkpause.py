@@ -156,6 +156,7 @@ def main() -> None:
 
     hosts_manager.block_permanent_domains()
     firewall_manager.block_alternative_dns()
+    firewall_manager.cleanup_orphaned_allowlist()
 
     for platform in ALL_PLATFORMS:
         hosts_manager.block_platform(platform)
@@ -172,17 +173,31 @@ def main() -> None:
         on_complete=lambda: logger.info("🌌 Focus session completed!"),
     )
 
-    def start_blackout(minutes: int) -> None:
+    def start_blackout(minutes: int, locked: bool = False) -> None:
         """Start a blackout from any thread (schedules on main thread)."""
-        root.after(0, lambda: blackout.start(minutes))
+        root.after(0, lambda: blackout.start(minutes, locked=locked))
 
     # ─── Crash recovery: resume persisted blackout ───
-    persisted_minutes: int | None = load_persisted_blackout()
-    if persisted_minutes is not None:
+    persisted: tuple[int, bool] | None = load_persisted_blackout()
+    if persisted is not None:
+        persisted_minutes, persisted_locked = persisted
+        lock_label: str = " [LOCKED]" if persisted_locked else ""
         logger.info(
-            f"🔄 Recovering blackout from crash: {persisted_minutes}m remaining."
+            f"🔄 Recovering blackout from crash: {persisted_minutes}m remaining.{lock_label}"
         )
-        root.after(1500, lambda: blackout.start(persisted_minutes))
+        root.after(
+            1500,
+            lambda: blackout.start(persisted_minutes, locked=persisted_locked),
+        )
+
+    # ─── Recurring Schedules ───
+    from core.scheduler import ScheduleManager
+
+    scheduler: ScheduleManager = ScheduleManager(
+        on_start_blackout=start_blackout,
+        is_blackout_active=lambda: blackout.is_active,
+    )
+    scheduler.start()
 
     # ─── Control Panel (lazy-created) ───
     _panel_ref: list = [None]
@@ -196,6 +211,7 @@ def main() -> None:
                 _panel_ref[0] = ControlPanel(
                     master=root,
                     on_start_blackout=start_blackout,
+                    scheduler=scheduler,
                 )
             else:
                 _panel_ref[0].show()
@@ -223,6 +239,10 @@ def main() -> None:
         target=run_tray, daemon=True, name="tray",
     )
     tray_thread.start()
+
+    # ─── Auto-open panel on boot (skip if recovering from crash blackout) ───
+    if persisted is None:
+        root.after(2000, open_panel)
 
     # ─── Integrity check loop (every 30s) ───
     def _integrity_check() -> None:
@@ -267,6 +287,13 @@ def main() -> None:
             pass
         # NOTE: DNS lock is intentionally NOT removed on exit.
         # It persists to protect permanent blocks across restarts.
+
+        # Disable allowlist if active (don't lock user out of internet)
+        try:
+            if firewall_manager.is_allowlist_active():
+                firewall_manager.disable_allowlist_mode()
+        except Exception:
+            pass
 
         if _instance_socket:
             try:

@@ -20,14 +20,15 @@ DarkPause es una herramienta de **disciplina digital extrema** para Windows. Com
 
 DarkPause no se limita a editar el hosts file. Usa un sistema multicapa inspirado en [SelfControl](https://github.com/SelfControlApp/selfcontrol) (macOS):
 
-| Capa                     | Técnica                  | Qué bloquea                                 |
-| ------------------------ | ------------------------ | ------------------------------------------- |
-| **1. Hosts File**        | `127.0.0.1 dominio.com`  | DNS local del sistema                       |
-| **2. DNS Anti-Bypass**   | Firewall rules (`netsh`) | Google DNS, Cloudflare, OpenDNS, Quad9      |
-| **3. DoT Lock**          | Bloqueo de puerto 853    | DNS-over-TLS                                |
-| **4. Integrity Monitor** | Verificación cada 30s    | Tampering manual del hosts file             |
-| **5. Persistent State**  | Estado en disco (JSON)   | Blackout sobrevive crashes/reinicios        |
-| **6. Watchdog**          | Script AHK externo       | Resurrección automática si matan el proceso |
+| Capa                     | Técnica                    | Qué bloquea                                 |
+| ------------------------ | -------------------------- | ------------------------------------------- |
+| **1. Hosts File**        | `127.0.0.1 dominio.com`    | DNS local del sistema                       |
+| **2. DNS Anti-Bypass**   | Firewall rules (`netsh`)   | Google DNS, Cloudflare, OpenDNS, Quad9      |
+| **3. DoT Lock**          | Bloqueo de puerto 853      | DNS-over-TLS                                |
+| **4. Integrity Monitor** | Verificación cada 30s      | Tampering manual del hosts file             |
+| **5. Persistent State**  | Estado en disco (JSON)     | Blackout sobrevive crashes/reinicios        |
+| **6. Watchdog**          | Script AHK externo         | Resurrección automática si matan el proceso |
+| **7. Allowlist Mode**    | Firewall Block-All + Allow | Solo dominios de trabajo permitidos         |
 
 ---
 
@@ -37,6 +38,10 @@ DarkPause no se limita a editar el hosts file. Usa un sistema multicapa inspirad
 - **📸 Platform Limiting:** Instagram (10 min/día), YouTube (60 min/día) con timer preciso.
 - **🔞 Permanent Blocking:** 80 dominios de contenido adulto bloqueados 24/7.
 - **🔒 DNS Anti-Bypass:** Bloquea DNS alternativos para que no puedas saltar el hosts file.
+- **🔒 Lock Mode (Nuclear):** Blackout irreversible — una vez activado, NO se puede cancelar.
+- **🔔 Multi-Step Warnings:** Notificaciones a los 5 min y 1 min restantes de cada plataforma.
+- **🌐 Deep Work Mode (Allowlist):** Bloquea TODO internet excepto dominios esenciales de trabajo.
+- **⏰ Schedules Recurrentes:** Programa bloqueos automáticos semanales (ej: Lunes-Viernes 9-17h).
 - **🔄 Crash Recovery:** Si la app crashea durante un blackout, se reanuda automáticamente.
 - **🛡️ Integrity Monitor:** Cada 30s verifica que nadie haya editado el hosts file.
 - **🍅 Pomodoro Shortcuts:** Botones rápidos para flujos 25/5 y 50/10.
@@ -59,7 +64,8 @@ D:\Code Projects\dark_pause\
 │   ├── __init__.py
 │   ├── config.py                  # Plataformas, dominios, constantes
 │   ├── hosts_manager.py           # Hosts file (atomic writes, markers)
-│   ├── firewall_manager.py        # DNS lock via netsh advfirewall
+│   ├── firewall_manager.py        # DNS lock + Allowlist mode via netsh
+│   ├── scheduler.py               # Schedules recurrentes (JSON + thread)
 │   ├── process_manager.py         # Detección y kill de procesos
 │   ├── usage_tracker.py           # Tracking de uso diario (JSON)
 │   └── icon_generator.py          # Iconos dinámicos para el tray
@@ -69,6 +75,8 @@ D:\Code Projects\dark_pause\
 │   ├── tray.py                    # System Tray (pystray) — proceso principal
 │   ├── blackout.py                # Overlay fullscreen + persistent state
 │   └── control_panel.py           # Panel de control (CustomTkinter)
+│                                    Platform usage dashboard, task queue,
+│                                    schedules, Deep Work toggle, Pomodoro
 │
 ├── scripts/                       # Scripts de Windows
 │   ├── launcher.ahk               # Ctrl+Alt+D → abre panel
@@ -99,10 +107,14 @@ DarkPause vive en tu **bandeja de sistema** (cerca del reloj). Haz clic derecho 
 ### Uso desde el Panel de Control
 
 1. Presiona **`Ctrl + Alt + D`** (requiere `launcher.ahk` activo).
-2. Elige tu modo:
-   - **Quick Focus:** _"Bloquear por X minutos"._
-   - **Programado:** _"Bloquear a las 16:00 durante 60 minutos"._
-   - **Pomodoro:** Clic en `🍅 Pomo 25` para work/break automático.
+2. Secciones disponibles:
+   - **🔒 Plataformas:** Dashboard con barras de progreso por plataforma (verde/naranja/rojo según uso).
+   - **📅 Programar Hora:** _"Bloquear a las 16:00 durante 60 minutos"._
+   - **⚡ Quick Focus:** _"Bloquear en X minutos por Y minutos"_ + checkbox Lock Mode.
+   - **🍅 Pomodoro:** Clic en `🍅 Pomo 25` o `🍅 Pomo 50` para work/break automático.
+   - **⏰ Schedules:** Programa bloqueos recurrentes semanales (ej: L-V 9:00-17:00).
+   - **🌐 Deep Work:** Toggle que bloquea TODO internet excepto dominios permitidos.
+   - **📋 Cola de Tareas:** Lista visual de tareas pendientes con indicador de Lock 🔒.
 
 ---
 

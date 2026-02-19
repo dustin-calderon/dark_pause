@@ -21,6 +21,7 @@ from core.config import (
     ALL_PLATFORMS,
     APP_NAME,
     MAX_TOOLTIP_LENGTH,
+    WARNING_STEPS,
     WARNING_THRESHOLD_MINUTES,
     Platform,
 )
@@ -52,7 +53,7 @@ class PlatformSession:
         self._paused: bool = False
         self._thread: Optional[threading.Thread] = None
         self._stop_event: threading.Event = threading.Event()
-        self._warning_sent: bool = False
+        self._warnings_sent: set[int] = set()
 
     @property
     def is_running(self) -> bool:
@@ -90,7 +91,8 @@ class PlatformSession:
             self._running = True
 
         self._stop_event.clear()
-        self._warning_sent = False
+        with self._state_lock:
+            self._warnings_sent = set()
 
         hosts_manager.unblock_platform(self.platform)
         usage_tracker.increment_session_count(self.platform)
@@ -151,14 +153,18 @@ class PlatformSession:
 
             self._update_callback()
 
-            # Warning notification
-            if remaining <= WARNING_THRESHOLD_MINUTES * 60 and not self._warning_sent:
-                mins_left: int = max(1, int(remaining // 60))
-                self._notify_callback(
-                    f"⚠️ {self.platform.display_name}: Poco tiempo",
-                    f"Quedan ~{mins_left} min.",
-                )
-                self._warning_sent = True
+            # Warning notifications (multi-step)
+            for step in WARNING_STEPS:
+                if remaining <= step * 60:
+                    with self._state_lock:
+                        already_sent: bool = step in self._warnings_sent
+                    if not already_sent:
+                        self._notify_callback(
+                            f"⚠️ {self.platform.display_name}: Quedan {step} min",
+                            "Cierra lo que estés haciendo.",
+                        )
+                        with self._state_lock:
+                            self._warnings_sent.add(step)
 
             # Limit reached
             if remaining <= 0:
@@ -182,13 +188,13 @@ class DarkPauseTray:
     def __init__(
         self,
         on_open_panel: Callable[[], None],
-        on_start_blackout: Callable[[int], None],
+        on_start_blackout: Callable[[int, bool], None],
     ) -> None:
         self._sessions: dict[str, PlatformSession] = {}
         self._icon: Optional[Icon] = None
         self._update_lock: threading.RLock = threading.RLock()
         self._on_open_panel: Callable[[], None] = on_open_panel
-        self._on_start_blackout: Callable[[int], None] = on_start_blackout
+        self._on_start_blackout: Callable[[int, bool], None] = on_start_blackout
 
         for platform in ALL_PLATFORMS:
             self._sessions[platform.id] = PlatformSession(
@@ -305,10 +311,10 @@ class DarkPauseTray:
             self._on_open_panel()
 
         def pomo25_cb(icon, item):
-            self._on_start_blackout(25)
+            self._on_start_blackout(25, False)
 
         def pomo50_cb(icon, item):
-            self._on_start_blackout(50)
+            self._on_start_blackout(50, False)
 
         menu_items: list[Item] = []
         menu_items.append(Item(APP_NAME, None, enabled=False))
